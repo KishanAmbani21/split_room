@@ -1,0 +1,578 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../models/activity_log_item.dart';
+import '../models/dashboard_data.dart';
+import '../models/dashboard_summary.dart';
+import '../models/group_overview.dart';
+import '../models/monthly_spending.dart';
+import '../models/pending_balance.dart';
+import '../models/recent_expense_item.dart';
+import '../../expenses/services/expense_service.dart';
+
+class DashboardService {
+  const DashboardService({required FirebaseFirestore firestore})
+      : _firestore = firestore;
+
+  final FirebaseFirestore _firestore;
+
+  Future<DashboardData> fetchDashboard(String uid) async {
+    final groupsSnap = await _firestore
+        .collection('groups')
+        .where('memberIds', arrayContains: uid)
+        .get();
+
+    final groups = groupsSnap.docs.map(_parseGroup).toList();
+    final groupIds = groups.map((g) => g.groupId).toList();
+    final groupMap = {for (final g in groups) g.groupId: g};
+
+    var expenses = <_ExpenseDoc>[];
+    if (groupIds.isNotEmpty) {
+      for (var i = 0; i < groupIds.length; i += 10) {
+        final chunk = groupIds.sublist(
+          i,
+          i + 10 > groupIds.length ? groupIds.length : i + 10,
+        );
+        final snap = await _firestore
+            .collection('expenses')
+            .where('groupId', whereIn: chunk)
+            .get();
+        expenses = [...expenses, ...snap.docs.map(_parseExpense)];
+      }
+    }
+
+    final summary = _computeSummary(uid, expenses);
+    final expenseByGroup = _expenseByGroup(expenses);
+    final expenseByCategory = _expenseByCategory(expenses);
+    final groupOverviews = _buildGroupOverviews(groups, expenses, uid);
+    final monthlySpending = _monthlySpending(expenses);
+    final pendingBalances = _pendingBalances(uid, expenses);
+    final activities = await _fetchActivities(uid, groupIds, groupMap);
+    final recentExpenses = _buildRecentExpenses(expenses, uid);
+    final mostActiveGroup = _mostActiveGroup(groupOverviews);
+    final topCategoryThisMonth = _topCategoryThisMonth(expenses);
+
+    return DashboardData(
+      summary: summary,
+      groups: groupOverviews,
+      activities: activities,
+      pendingBalances: pendingBalances,
+      monthlySpending: monthlySpending,
+      expenseByGroup: expenseByGroup,
+      expenseByCategory: expenseByCategory,
+      recentExpenses: recentExpenses,
+      mostActiveGroup: mostActiveGroup,
+      topCategoryThisMonth: topCategoryThisMonth,
+    );
+  }
+
+  GroupOverview _parseGroup(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data();
+    final memberIds = List<String>.from(data['memberIds'] as List? ?? []);
+    final updatedAt = (data['updatedAt'] as Timestamp?)?.toDate();
+    final lastExpenseAt = (data['lastExpenseAt'] as Timestamp?)?.toDate();
+    final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+    DateTime? lastActivity = updatedAt;
+    if (lastExpenseAt != null &&
+        (lastActivity == null || lastExpenseAt.isAfter(lastActivity))) {
+      lastActivity = lastExpenseAt;
+    }
+
+    return GroupOverview(
+      groupId: data['groupId'] as String? ?? doc.id,
+      groupName: data['groupName'] as String? ?? 'Group',
+      groupImage: data['groupImage'] as String? ?? '',
+      memberCount: memberIds.length,
+      totalExpense: (data['totalExpense'] as num?)?.toDouble() ?? 0,
+      yourBalance: 0,
+      groupType: data['groupType'] as String? ?? 'room',
+      createdAt: createdAt,
+      lastActivityAt: lastActivity ?? createdAt,
+    );
+  }
+
+  _ExpenseDoc _parseExpense(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = doc.data();
+    final splitsRaw = data['splits'] as List? ?? [];
+    final splits = splitsRaw.map((s) {
+      final map = Map<String, dynamic>.from(s as Map);
+      return _SplitPart(
+        userId: map['userId'] as String? ?? '',
+        userName: map['userName'] as String? ?? 'Member',
+        amount: (map['amount'] as num?)?.toDouble() ?? 0,
+      );
+    }).toList();
+
+    final title = data['title'] as String? ?? 'Expense';
+    return _ExpenseDoc(
+      id: doc.id,
+      groupId: data['groupId'] as String? ?? '',
+      groupName: data['groupName'] as String? ?? '',
+      title: title,
+      amount: (data['amount'] as num?)?.toDouble() ?? 0,
+      paidBy: data['paidBy'] as String? ?? '',
+      paidByName: data['paidByName'] as String? ?? 'Someone',
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+      category: data['category'] as String? ?? inferExpenseCategory(title),
+      splits: splits,
+    );
+  }
+
+  Map<String, double> _expenseByCategory(List<_ExpenseDoc> expenses) {
+    final map = <String, double>{};
+    for (final e in expenses) {
+      map[e.category] = (map[e.category] ?? 0) + e.amount;
+    }
+    return map;
+  }
+
+  GroupOverview? _mostActiveGroup(List<GroupOverview> groups) {
+    if (groups.isEmpty) return null;
+    return groups.reduce(
+      (a, b) => a.totalExpense >= b.totalExpense ? a : b,
+    );
+  }
+
+  String _topCategoryThisMonth(List<_ExpenseDoc> expenses) {
+    final map = <String, double>{};
+    for (final e in expenses) {
+      if (!_isThisMonth(e.createdAt)) continue;
+      map[e.category] = (map[e.category] ?? 0) + e.amount;
+    }
+    if (map.isEmpty) return 'Other';
+    return map.entries.reduce((a, b) => a.value >= b.value ? a : b).key;
+  }
+
+  bool _isThisMonth(DateTime? date) {
+    if (date == null) return false;
+    final now = DateTime.now();
+    return date.year == now.year && date.month == now.month;
+  }
+
+  DashboardSummary _computeSummary(String uid, List<_ExpenseDoc> expenses) {
+    var totalSpent = 0.0;
+    var needToPay = 0.0;
+    var willReceive = 0.0;
+    var monthYouPaid = 0.0;
+    var monthNeedToPay = 0.0;
+    var monthTotalSpent = 0.0;
+    var monthWillReceive = 0.0;
+
+    for (final expense in expenses) {
+      final mySplit = expense.splits
+          .where((s) => s.userId == uid)
+          .fold<double>(0, (total, s) => total + s.amount);
+      final inMonth = _isThisMonth(expense.createdAt);
+
+      if (expense.paidBy == uid) {
+        totalSpent += expense.amount;
+        if (inMonth) {
+          monthYouPaid += expense.amount;
+          monthTotalSpent += expense.amount;
+        }
+        for (final split in expense.splits) {
+          if (split.userId != uid) {
+            willReceive += split.amount;
+            if (inMonth) monthWillReceive += split.amount;
+          }
+        }
+      } else {
+        needToPay += mySplit;
+        if (inMonth) monthNeedToPay += mySplit;
+      }
+    }
+
+    return DashboardSummary(
+      totalSpent: totalSpent,
+      needToPay: needToPay,
+      willReceive: willReceive,
+      monthYouPaid: monthYouPaid,
+      monthNeedToPay: monthNeedToPay,
+      monthTotalSpent: monthTotalSpent,
+      monthWillReceive: monthWillReceive,
+    );
+  }
+
+  List<RecentExpenseItem> _buildRecentExpenses(
+    List<_ExpenseDoc> expenses,
+    String uid,
+  ) {
+    final sorted = List<_ExpenseDoc>.from(expenses)
+      ..sort((a, b) {
+        final at = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final bt = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
+        return bt.compareTo(at);
+      });
+
+    return sorted.take(8).map((e) {
+      var impact = 0.0;
+      if (e.paidBy == uid) {
+        impact = e.splits
+            .where((s) => s.userId != uid)
+            .fold<double>(0, (t, s) => t + s.amount);
+      } else {
+        impact = -e.splits
+            .where((s) => s.userId == uid)
+            .fold<double>(0, (t, s) => t + s.amount);
+      }
+      return RecentExpenseItem(
+        id: e.id,
+        groupId: e.groupId,
+        groupName: e.groupName,
+        title: e.title,
+        amount: e.amount,
+        paidByName: e.paidByName,
+        createdAt: e.createdAt,
+        balanceImpact: impact,
+      );
+    }).toList();
+  }
+
+  Map<String, double> _expenseByGroup(List<_ExpenseDoc> expenses) {
+    final map = <String, double>{};
+    for (final e in expenses) {
+      map[e.groupId] = (map[e.groupId] ?? 0) + e.amount;
+    }
+    return map;
+  }
+
+  List<GroupOverview> _buildGroupOverviews(
+    List<GroupOverview> groups,
+    List<_ExpenseDoc> expenses,
+    String uid,
+  ) {
+    return groups.map((group) {
+      final groupExpenses =
+          expenses.where((e) => e.groupId == group.groupId).toList();
+      final totalExpense =
+          groupExpenses.fold<double>(0, (total, e) => total + e.amount);
+
+      var balance = 0.0;
+      for (final expense in groupExpenses) {
+        if (expense.paidBy == uid) {
+          for (final split in expense.splits) {
+            if (split.userId != uid) balance += split.amount;
+          }
+        } else {
+          final owed = expense.splits
+              .where((s) => s.userId == uid)
+              .fold<double>(0, (total, s) => total + s.amount);
+          balance -= owed;
+        }
+      }
+
+      return GroupOverview(
+        groupId: group.groupId,
+        groupName: group.groupName,
+        groupImage: group.groupImage,
+        memberCount: group.memberCount,
+        totalExpense: totalExpense,
+        yourBalance: balance,
+        groupType: group.groupType,
+        createdAt: group.createdAt,
+        lastActivityAt: group.lastActivityAt,
+      );
+    }).toList();
+  }
+
+  List<MonthlySpending> _monthlySpending(List<_ExpenseDoc> expenses) {
+    final now = DateTime.now();
+    final months = <String, MonthlySpending>{};
+
+    for (var i = 5; i >= 0; i--) {
+      final date = DateTime(now.year, now.month - i, 1);
+      final key = '${date.year}-${date.month}';
+      months[key] = MonthlySpending(
+        monthLabel: _monthLabel(date.month),
+        amount: 0,
+        month: date.month,
+        year: date.year,
+      );
+    }
+
+    for (final expense in expenses) {
+      final date = expense.createdAt ?? now;
+      final key = '${date.year}-${date.month}';
+      if (months.containsKey(key)) {
+        final current = months[key]!;
+        months[key] = MonthlySpending(
+          monthLabel: current.monthLabel,
+          amount: current.amount + expense.amount,
+          month: current.month,
+          year: current.year,
+        );
+      }
+    }
+
+    return months.values.toList();
+  }
+
+  List<PendingBalance> _pendingBalances(String uid, List<_ExpenseDoc> expenses) {
+    final balanceMap = <String, _PersonBalance>{};
+
+    for (final expense in expenses) {
+      if (expense.paidBy == uid) {
+        for (final split in expense.splits) {
+          if (split.userId == uid) continue;
+          final entry = balanceMap.putIfAbsent(
+            split.userId,
+            () => _PersonBalance(split.userId, split.userName),
+          );
+          entry.theyOweYou += split.amount;
+        }
+      } else {
+        final mySplit = expense.splits.where((s) => s.userId == uid);
+        for (final split in mySplit) {
+          final entry = balanceMap.putIfAbsent(
+            expense.paidBy,
+            () => _PersonBalance(expense.paidBy, expense.paidByName),
+          );
+          entry.youOweThem += split.amount;
+        }
+      }
+    }
+
+    final results = <PendingBalance>[];
+    for (final entry in balanceMap.values) {
+      final net = entry.theyOweYou - entry.youOweThem;
+      if (net.abs() < 0.01) continue;
+      results.add(
+        PendingBalance(
+          userId: entry.userId,
+          name: entry.name,
+          amount: net.abs(),
+          isOwedToYou: net > 0,
+        ),
+      );
+    }
+
+    results.sort((a, b) => b.amount.compareTo(a.amount));
+    return results;
+  }
+
+  Future<List<ActivityLogItem>> _fetchActivities(
+    String uid,
+    List<String> groupIds,
+    Map<String, GroupOverview> groupMap,
+  ) async {
+    final logs = <ActivityLogItem>[];
+
+    if (groupIds.isNotEmpty) {
+      for (var i = 0; i < groupIds.length; i += 10) {
+        final chunk = groupIds.sublist(
+          i,
+          i + 10 > groupIds.length ? groupIds.length : i + 10,
+        );
+        try {
+          final snap = await _firestore
+              .collection('group_logs')
+              .where('groupId', whereIn: chunk)
+              .orderBy('timestamp', descending: true)
+              .limit(15)
+              .get();
+
+          for (final doc in snap.docs) {
+            logs.add(_parseLog(doc, groupMap));
+          }
+        } catch (_) {
+          final snap = await _firestore
+              .collection('group_logs')
+              .where('groupId', whereIn: chunk)
+              .get();
+          for (final doc in snap.docs) {
+            logs.add(_parseLog(doc, groupMap));
+          }
+        }
+      }
+    }
+
+    logs.sort((a, b) {
+      final at = a.timestamp ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bt = b.timestamp ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return bt.compareTo(at);
+    });
+
+    return logs.take(20).toList();
+  }
+
+  ActivityLogItem _parseLog(
+    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+    Map<String, GroupOverview> groupMap,
+  ) {
+    final data = doc.data();
+    final action = data['actionType'] as String? ?? '';
+    final creator = data['creatorName'] as String? ?? 'Someone';
+    final groupId = data['groupId'] as String? ?? '';
+    final group = groupMap[groupId];
+    final groupName =
+        group?.groupName ??
+        (data['groupData'] as Map?)?['groupName'] as String? ??
+        'Group';
+    final groupImage = group?.groupImage ?? '';
+
+    ActivityType type;
+    String title;
+    String subtitle;
+
+    switch (action) {
+      case 'GROUP_CREATED':
+        type = ActivityType.groupCreated;
+        title = 'Group created';
+        subtitle = data['actionMessage'] as String? ??
+            '$creator created this group';
+        break;
+      case 'GROUP_UPDATED':
+        type = ActivityType.groupUpdated;
+        title = 'Group updated';
+        subtitle = '$creator updated the group';
+        break;
+      case 'EXPENSE_ADDED':
+        type = ActivityType.expenseAdded;
+        title = 'Expense added';
+        final addedData = data['expenseData'] as Map?;
+        final addedTitle = addedData?['title'] as String?;
+        subtitle = addedTitle != null
+            ? '$creator added "$addedTitle"'
+            : '$creator added an expense';
+        break;
+      case 'EXPENSE_UPDATED':
+        type = ActivityType.expenseUpdated;
+        title = 'Expense updated';
+        final updatedData = data['expenseData'] as Map?;
+        final updatedTitle = updatedData?['title'] as String?;
+        subtitle = updatedTitle != null
+            ? '$creator updated "$updatedTitle"'
+            : '$creator updated an expense';
+        break;
+      case 'EXPENSE_DELETED':
+        type = ActivityType.expenseDeleted;
+        title = 'Expense deleted';
+        final deletedExp = data['deletedSnapshot'] as Map?;
+        final deletedTitle = deletedExp?['title'] as String?;
+        subtitle = deletedTitle != null
+            ? '$creator deleted "$deletedTitle"'
+            : '$creator deleted an expense';
+        break;
+      case 'MEMBER_JOINED':
+        type = ActivityType.memberJoined;
+        title = 'Member joined';
+        subtitle = '$creator added a member';
+        break;
+      case 'MEMBER_REMOVED':
+        type = ActivityType.memberRemoved;
+        title = 'Member removed';
+        final removed = data['deletedSnapshot'] as Map?;
+        final removedName = removed?['name'] as String? ?? 'A member';
+        subtitle = '$creator removed $removedName';
+        break;
+      case 'SETTLEMENT':
+        type = ActivityType.settlement;
+        title = 'Settlement done';
+        subtitle = '$creator settled up';
+        break;
+      case 'ACTIVITY_RESTORED':
+        type = ActivityType.activityRestored;
+        title = 'Restored';
+        subtitle = '$creator restored a deleted item';
+        break;
+      default:
+        type = ActivityType.unknown;
+        title = action.replaceAll('_', ' ');
+        subtitle = groupName;
+    }
+
+    final isRestored = data['restored'] == true;
+    final expenseData = data['expenseData'] as Map?;
+    final memberData = data['memberData'] as Map?;
+    final deletedSnapshot = data['deletedSnapshot'] as Map?;
+    String? relatedId;
+    double? amount;
+
+    if (type == ActivityType.expenseAdded ||
+        type == ActivityType.expenseUpdated) {
+      relatedId = expenseData?['expenseId'] as String?;
+      amount = (expenseData?['amount'] as num?)?.toDouble();
+    } else if (type == ActivityType.expenseDeleted) {
+      relatedId = deletedSnapshot?['expenseId'] as String?;
+      amount = (deletedSnapshot?['amount'] as num?)?.toDouble();
+    } else if (type == ActivityType.memberJoined) {
+      relatedId = memberData?['uid'] as String?;
+    } else if (type == ActivityType.memberRemoved) {
+      relatedId = deletedSnapshot?['uid'] as String?;
+    }
+
+    final canUndo = !isRestored &&
+        (type == ActivityType.expenseDeleted ||
+            type == ActivityType.memberRemoved);
+
+    return ActivityLogItem(
+      id: doc.id,
+      title: title,
+      subtitle: subtitle,
+      timestamp: (data['timestamp'] as Timestamp?)?.toDate(),
+      type: type,
+      amount: amount,
+      groupName: groupName,
+      groupId: groupId,
+      groupImage: groupImage,
+      relatedId: relatedId,
+      actorName: creator,
+      canUndo: canUndo,
+      isRestored: isRestored,
+    );
+  }
+
+  String _monthLabel(int month) {
+    const labels = [
+      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+    ];
+    return labels[month - 1];
+  }
+}
+
+class _ExpenseDoc {
+  const _ExpenseDoc({
+    required this.id,
+    required this.groupId,
+    required this.groupName,
+    required this.title,
+    required this.amount,
+    required this.paidBy,
+    required this.paidByName,
+    required this.category,
+    required this.splits,
+    this.createdAt,
+  });
+
+  final String id;
+  final String groupId;
+  final String groupName;
+  final String title;
+  final double amount;
+  final String paidBy;
+  final String paidByName;
+  final DateTime? createdAt;
+  final String category;
+  final List<_SplitPart> splits;
+}
+
+class _SplitPart {
+  const _SplitPart({
+    required this.userId,
+    required this.userName,
+    required this.amount,
+  });
+
+  final String userId;
+  final String userName;
+  final double amount;
+}
+
+class _PersonBalance {
+  _PersonBalance(this.userId, this.name);
+
+  final String userId;
+  final String name;
+  double youOweThem = 0;
+  double theyOweYou = 0;
+}

@@ -20,6 +20,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   bool _loading = false;
+  String? _errorMessage;
 
   @override
   void dispose() {
@@ -33,7 +34,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       return;
     }
 
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+    });
     try {
       await ref
           .read(authRepositoryProvider)
@@ -46,7 +50,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       }
     } catch (error) {
       if (mounted) {
-        showAppSnackBar(context, authErrorMessage(error), isError: true);
+        final message = authErrorMessage(error);
+        setState(() => _errorMessage = message);
+        showAppSnackBar(context, message, isError: true);
       }
     } finally {
       if (mounted) {
@@ -83,6 +89,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               validator: validatePassword,
               onFieldSubmitted: (_) => _loading ? null : _login(),
             ),
+            if (_errorMessage != null) ...[
+              const SizedBox(height: 14),
+              AuthErrorMessage(message: _errorMessage!),
+            ],
             const SizedBox(height: 22),
             ElevatedButton(
               onPressed: _loading ? null : _login,
@@ -101,6 +111,43 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class AuthErrorMessage extends StatelessWidget {
+  const AuthErrorMessage({required this.message, super.key});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: scheme.error.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.error.withValues(alpha: 0.35)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.error_outline_rounded, color: scheme.error, size: 20),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                color: scheme.error,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

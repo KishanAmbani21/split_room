@@ -21,6 +21,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   bool _loading = false;
+  String? _errorMessage;
 
   @override
   void dispose() {
@@ -36,7 +37,10 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       return;
     }
 
-    setState(() => _loading = true);
+    setState(() {
+      _loading = true;
+      _errorMessage = null;
+    });
     try {
       await ref
           .read(authRepositoryProvider)
@@ -54,7 +58,9 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
       }
     } catch (error) {
       if (mounted) {
-        showAppSnackBar(context, authErrorMessage(error), isError: true);
+        final message = authErrorMessage(error);
+        setState(() => _errorMessage = message);
+        showAppSnackBar(context, message, isError: true);
       }
     } finally {
       if (mounted) {
@@ -132,6 +138,10 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
               },
               onFieldSubmitted: (_) => _loading ? null : _signup(),
             ),
+            if (_errorMessage != null) ...[
+              const SizedBox(height: 14),
+              AuthErrorMessage(message: _errorMessage!),
+            ],
             const SizedBox(height: 22),
             ElevatedButton(
               onPressed: _loading ? null : _signup,

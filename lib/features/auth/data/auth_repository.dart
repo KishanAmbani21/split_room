@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'dart:convert';
 
 class AuthRepository {
   const AuthRepository({
@@ -42,7 +44,7 @@ class AuthRepository {
       'uid': user.uid,
       'full_name': fullName.trim(),
       'email': normalizedEmail,
-      'password': 'managed_by_firebase_auth',
+      'password': _hashPassword(password),
       'created_at': FieldValue.serverTimestamp(),
       'updated_at': FieldValue.serverTimestamp(),
       'status': 'active',
@@ -74,6 +76,10 @@ class AuthRepository {
   }
 
   Future<void> logout() => _auth.signOut();
+
+  String _hashPassword(String password) {
+    return sha256.convert(utf8.encode(password)).toString();
+  }
 }
 
 class AuthException implements Exception {
