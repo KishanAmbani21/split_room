@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "174704703743",
+    "project_id": "splitroomapp-c57d6",
+    "storage_bucket": "splitroomapp-c57d6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:174704703743:android:65c773d6c90a45022db4ca",
+        "android_client_info": {
+          "package_name": "com.example.room_expense_manager"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDsmByVuiIrZpZgGBwqL3jdJPg26scSBQo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
