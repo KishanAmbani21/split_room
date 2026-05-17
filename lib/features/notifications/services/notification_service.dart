@@ -1,6 +1,9 @@
+import 'dart:async';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
+import '../../../shared/services/firestore_write_logger.dart';
 import '../../groups/models/create_group_input.dart';
 
 class NotificationService {
@@ -13,23 +16,75 @@ class NotificationService {
   final FirebaseFirestore _firestore;
   final FirebaseMessaging _messaging;
 
+  String? _activeUserId;
+  String? _lastPersistedToken;
+  StreamSubscription<String>? _tokenRefreshSub;
+  bool _initializedForSession = false;
+
   static const typeGroupCreated = 'GROUP_CREATED';
 
+  /// Initializes FCM once per app session per user. Does not write unless the
+  /// token actually changed.
   Future<void> initializeForUser(String userId) async {
+    if (userId.isEmpty) return;
+
+    if (_activeUserId != userId) {
+      await _tokenRefreshSub?.cancel();
+      _tokenRefreshSub = null;
+      _lastPersistedToken = null;
+      _initializedForSession = false;
+      _activeUserId = userId;
+    }
+
+    if (_initializedForSession) return;
+    _initializedForSession = true;
+
     await _requestPermission();
     final token = await _messaging.getToken();
     if (token != null) {
-      await _firestore.collection('users').doc(userId).set(
-        {'fcmToken': token, 'updatedAt': FieldValue.serverTimestamp()},
-        SetOptions(merge: true),
-      );
+      await _persistFcmTokenIfNeeded(userId, token);
     }
-    _messaging.onTokenRefresh.listen((newToken) {
-      _firestore.collection('users').doc(userId).set(
-        {'fcmToken': newToken, 'updatedAt': FieldValue.serverTimestamp()},
-        SetOptions(merge: true),
-      );
+
+    _tokenRefreshSub ??= _messaging.onTokenRefresh.listen((newToken) {
+      final uid = _activeUserId;
+      if (uid == null || uid.isEmpty) return;
+      unawaited(_persistFcmTokenIfNeeded(uid, newToken));
     });
+  }
+
+  /// Call on logout so the next user gets a fresh init.
+  void resetSession() {
+    unawaited(_tokenRefreshSub?.cancel());
+    _tokenRefreshSub = null;
+    _activeUserId = null;
+    _lastPersistedToken = null;
+    _initializedForSession = false;
+  }
+
+  Future<void> _persistFcmTokenIfNeeded(String userId, String token) async {
+    if (_lastPersistedToken == token && _activeUserId == userId) {
+      return;
+    }
+
+    final ref = _firestore.collection('users').doc(userId);
+    final snap = await ref.get();
+    final existing = snap.data()?['fcmToken'] as String?;
+    if (existing == token) {
+      _lastPersistedToken = token;
+      return;
+    }
+
+    await ref.set(
+      {'fcmToken': token},
+      SetOptions(merge: true),
+    );
+    FirestoreWriteLogger.log(
+      'set(merge)',
+      collection: 'users',
+      documentId: userId,
+      reason: 'FCM token update',
+    );
+    _lastPersistedToken = token;
   }
 
   Future<void> _requestPermission() async {
@@ -43,6 +98,7 @@ class NotificationService {
     const title = 'New Group Added';
     final batch = _firestore.batch();
     final now = FieldValue.serverTimestamp();
+    var count = 0;
 
     for (final member in input.selectedMembers) {
       final message =
@@ -60,9 +116,17 @@ class NotificationService {
         createdBy: input.createdBy,
         createdAt: now,
       ));
+      count++;
     }
 
+    if (count == 0) return;
+
     await batch.commit();
+    FirestoreWriteLogger.log(
+      'batch.set',
+      collection: 'notifications',
+      reason: 'group created ($count docs)',
+    );
   }
 
   Future<void> notifyGroupMembers({
@@ -78,6 +142,7 @@ class NotificationService {
   }) async {
     final batch = _firestore.batch();
     final now = FieldValue.serverTimestamp();
+    var count = 0;
 
     for (final memberId in memberIds) {
       if (memberId == excludeUserId) continue;
@@ -94,9 +159,17 @@ class NotificationService {
         createdBy: createdBy,
         createdAt: now,
       ));
+      count++;
     }
 
+    if (count == 0) return;
+
     await batch.commit();
+    FirestoreWriteLogger.log(
+      'batch.set',
+      collection: 'notifications',
+      reason: '$type ($count docs)',
+    );
   }
 
   Map<String, dynamic> _notificationPayload({
@@ -170,6 +243,12 @@ class NotificationService {
       'isRead': true,
       'read': true,
     });
+    FirestoreWriteLogger.log(
+      'update',
+      collection: 'notifications',
+      documentId: notificationId,
+      reason: 'mark read',
+    );
   }
 
   Future<void> markAllRead(String userId) async {
@@ -178,12 +257,20 @@ class NotificationService {
         .where('userId', isEqualTo: userId)
         .get();
     final batch = _firestore.batch();
+    var count = 0;
     for (final doc in snap.docs) {
       final data = doc.data();
       if (data['isRead'] == true || data['read'] == true) continue;
       batch.update(doc.reference, {'isRead': true, 'read': true});
+      count++;
     }
+    if (count == 0) return;
     await batch.commit();
+    FirestoreWriteLogger.log(
+      'batch.update',
+      collection: 'notifications',
+      reason: 'mark all read ($count docs)',
+    );
   }
 }
 

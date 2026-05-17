@@ -21,7 +21,9 @@ class DashboardNavIndex extends Notifier<int> {
   void select(int index) => state = index;
 }
 
+/// Cached while dashboard is open — avoids refetching on every tab switch.
 final dashboardDataProvider = FutureProvider.autoDispose
     .family<DashboardData, String>((ref, uid) {
+  ref.keepAlive();
   return ref.watch(dashboardServiceProvider).fetchDashboard(uid);
 });

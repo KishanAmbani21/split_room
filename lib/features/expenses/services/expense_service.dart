@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../../shared/services/firestore_write_logger.dart';
 import '../../notifications/services/notification_service.dart';
 import '../models/add_expense_input.dart';
 import '../models/expense_group_member.dart';
@@ -51,6 +52,12 @@ class ExpenseService {
       });
 
     await batch.commit();
+    FirestoreWriteLogger.log(
+      'batch',
+      collection: 'expenses',
+      documentId: expenseId,
+      reason: 'create expense',
+    );
 
     await _notify(
       memberIds: input.memberIds,
@@ -110,6 +117,12 @@ class ExpenseService {
     }
 
     await batch.commit();
+    FirestoreWriteLogger.log(
+      'batch',
+      collection: 'expenses',
+      documentId: input.expenseId,
+      reason: 'update expense',
+    );
 
     await _notify(
       memberIds: input.memberIds,
@@ -160,6 +173,12 @@ class ExpenseService {
       });
 
     await batch.commit();
+    FirestoreWriteLogger.log(
+      'batch',
+      collection: 'expenses',
+      documentId: expenseId,
+      reason: 'delete expense',
+    );
 
     final groupSnap = await _firestore.collection('groups').doc(groupId).get();
     final groupImage = groupSnap.data()?['groupImage'] as String? ?? '';

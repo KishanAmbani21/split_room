@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../../../shared/services/firestore_write_logger.dart';
+
 import '../models/create_group_input.dart';
 import '../models/group_model.dart';
 
@@ -113,6 +115,12 @@ class GroupRepository {
     });
 
     await batch.commit();
+    FirestoreWriteLogger.log(
+      'batch',
+      collection: 'groups',
+      documentId: groupId,
+      reason: 'create group',
+    );
     return groupId;
   }
 
@@ -138,6 +146,11 @@ class GroupRepository {
       }, SetOptions(merge: true));
     }
     await batch.commit();
+    FirestoreWriteLogger.log(
+      'batch',
+      collection: 'group_members',
+      reason: 'add ${newMembers.length} members',
+    );
   }
 }
 

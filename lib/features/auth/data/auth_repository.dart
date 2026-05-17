@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:crypto/crypto.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'dart:convert';
+
+import '../../../shared/services/firestore_write_logger.dart';
 
 class AuthRepository {
   const AuthRepository({
@@ -51,6 +54,12 @@ class AuthRepository {
       'login_type': 'email',
       'device_type': 'android',
     });
+    FirestoreWriteLogger.log(
+      'set',
+      collection: 'users',
+      documentId: user.uid,
+      reason: 'signup — single user document',
+    );
   }
 
   Future<void> login({required String email, required String password}) async {
@@ -71,8 +80,7 @@ class AuthRepository {
         'Your profile was not found in Firestore. Please contact support.',
       );
     }
-
-    await doc.reference.update({'updated_at': FieldValue.serverTimestamp()});
+    // Intentionally no Firestore write on login — avoids quota burn on every sign-in.
   }
 
   Future<void> logout() => _auth.signOut();

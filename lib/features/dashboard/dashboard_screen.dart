@@ -23,6 +23,7 @@ class DashboardScreen extends ConsumerWidget {
 
   Future<void> _logout(BuildContext context, WidgetRef ref) async {
     try {
+      ref.read(notificationServiceProvider).resetSession();
       await ref.read(authRepositoryProvider).logout();
       if (context.mounted) {
         showAppSnackBar(context, 'Logged out successfully.');
@@ -59,7 +60,8 @@ class DashboardScreen extends ConsumerWidget {
           );
         }
 
-        ref.read(notificationServiceProvider).initializeForUser(user.uid);
+        // FCM init once per session (not on every rebuild).
+        ref.watch(notificationInitProvider(uid));
 
         return Scaffold(
           backgroundColor: Colors.transparent,
