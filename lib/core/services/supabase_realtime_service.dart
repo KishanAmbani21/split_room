@@ -26,6 +26,7 @@ class SupabaseRealtimeService {
           .isFilter('deleted_at', null);
       final groups = <Map<String, dynamic>>[];
       for (final row in rows as List) {
+        if (row['user_id']?.toString() != userId) continue;
         final g = row['groups'];
         if (g is Map<String, dynamic> && g['deleted_at'] == null) {
           groups.add(g);

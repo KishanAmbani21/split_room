@@ -9,6 +9,7 @@ import '../../groups/models/split_type.dart';
 import '../models/add_expense_input.dart';
 import '../models/expense_group_member.dart';
 import '../services/expense_service.dart';
+import '../utils/expense_split_builder.dart';
 import 'expense_providers.dart';
 
 final editExpenseProvider =
@@ -53,6 +54,7 @@ class EditExpenseState {
     this.splitType = SplitType.equal,
     this.customAmounts = const {},
     this.percentages = const {},
+    this.shares = const {},
     this.isLoading = true,
     this.isSubmitting = false,
     this.titleError,
@@ -76,6 +78,7 @@ class EditExpenseState {
   final SplitType splitType;
   final Map<String, double> customAmounts;
   final Map<String, double> percentages;
+  final Map<String, int> shares;
   final bool isLoading;
   final bool isSubmitting;
   final String? titleError;
@@ -93,6 +96,23 @@ class EditExpenseState {
 
   List<ExpenseGroupMember> get selectedMembers =>
       members.where((m) => selectedMemberIds.contains(m.uid)).toList();
+
+  double get perPersonShare {
+    final amount = parsedAmount;
+    if (amount == null || selectedCount == 0) return 0;
+    return amount / selectedCount;
+  }
+
+  int get totalShares => selectedMembers.fold<int>(
+        0,
+        (s, m) => s + (shares[m.uid] ?? 1).clamp(1, 99),
+      );
+
+  double get perShareAmount {
+    final total = parsedAmount;
+    if (total == null || totalShares <= 0) return 0;
+    return total / totalShares;
+  }
 
   double get customTotal =>
       selectedMembers.fold(0.0, (s, m) => s + (customAmounts[m.uid] ?? 0));
@@ -130,6 +150,7 @@ class EditExpenseState {
     SplitType? splitType,
     Map<String, double>? customAmounts,
     Map<String, double>? percentages,
+    Map<String, int>? shares,
     bool? isLoading,
     bool? isSubmitting,
     String? titleError,
@@ -159,6 +180,7 @@ class EditExpenseState {
       splitType: splitType ?? this.splitType,
       customAmounts: customAmounts ?? this.customAmounts,
       percentages: percentages ?? this.percentages,
+      shares: shares ?? this.shares,
       isLoading: isLoading ?? this.isLoading,
       isSubmitting: isSubmitting ?? this.isSubmitting,
       titleError: clearTitleError ? null : (titleError ?? this.titleError),
@@ -185,7 +207,8 @@ class EditExpenseNotifier extends Notifier<EditExpenseState> {
 
     final splitMembers =
         List<String>.from(data['splitMembers'] as List? ?? []);
-    final splitTypeName = data['splitType'] as String? ?? 'equal';
+    final splitTypeName =
+        data['split_type'] as String? ?? data['splitType'] as String? ?? 'equal';
     final splitType = SplitType.values.firstWhere(
       (t) => t.name == splitTypeName,
       orElse: () => SplitType.equal,
@@ -194,16 +217,34 @@ class EditExpenseNotifier extends Notifier<EditExpenseState> {
     final splitsRaw = data['splits'] as List? ?? [];
     final customAmounts = <String, double>{};
     final percentages = <String, double>{};
+    final sharesMap = <String, int>{};
     final amount = (data['amount'] as num?)?.toDouble() ?? 0;
 
     for (final s in splitsRaw) {
       final map = Map<String, dynamic>.from(s as Map);
-      final uid = map['userId'] as String? ?? '';
+      final uid = map['userId'] as String? ?? map['user_id'] as String? ?? '';
       final share = (map['amount'] as num?)?.toDouble() ?? 0;
       if (splitType == SplitType.custom) {
         customAmounts[uid] = share;
       } else if (splitType == SplitType.percentage && amount > 0) {
         percentages[uid] = (share / amount * 100);
+      }
+    }
+
+    if (splitType == SplitType.shares && amount > 0 && splitsRaw.isNotEmpty) {
+      final minAmount = splitsRaw
+          .map((s) => (Map<String, dynamic>.from(s as Map)['amount'] as num?)
+                  ?.toDouble() ??
+              0)
+          .where((a) => a > 0)
+          .fold<double>(double.infinity, (m, a) => a < m ? a : m);
+      if (minAmount.isFinite && minAmount > 0) {
+        for (final s in splitsRaw) {
+          final map = Map<String, dynamic>.from(s as Map);
+          final uid = map['userId'] as String? ?? map['user_id'] as String? ?? '';
+          final share = (map['amount'] as num?)?.toDouble() ?? 0;
+          sharesMap[uid] = (share / minAmount).round().clamp(1, 99);
+        }
       }
     }
 
@@ -226,6 +267,7 @@ class EditExpenseNotifier extends Notifier<EditExpenseState> {
       splitType: splitType,
       customAmounts: customAmounts,
       percentages: percentages,
+      shares: sharesMap,
       isLoading: false,
     );
   }
@@ -250,6 +292,19 @@ class EditExpenseNotifier extends Notifier<EditExpenseState> {
     final map = Map<String, double>.from(state.percentages);
     map[uid] = v;
     state = state.copyWith(percentages: map, clearSplitError: true);
+  }
+
+  void setShare(String uid, int value) {
+    final map = Map<String, int>.from(state.shares);
+    map[uid] = value.clamp(1, 99);
+    state = state.copyWith(shares: map, clearSplitError: true);
+  }
+
+  void selectAllMembers() {
+    state = state.copyWith(
+      selectedMemberIds: state.members.map((m) => m.uid).toSet(),
+      clearMembersError: true,
+    );
   }
 
   void toggleMember(String uid) {
@@ -338,15 +393,14 @@ class EditExpenseNotifier extends Notifier<EditExpenseState> {
   }
 
   List<ExpenseSplitEntry> _buildSplits(double amount) {
-    final members = state.selectedMembers;
-    switch (state.splitType) {
-      case SplitType.equal:
-        return buildEqualSplits(amount, members);
-      case SplitType.custom:
-        return buildCustomSplits(members, state.customAmounts);
-      case SplitType.percentage:
-        return buildPercentageSplits(amount, members, state.percentages);
-    }
+    return buildSplitsForType(
+      splitType: state.splitType,
+      amount: amount,
+      members: state.selectedMembers,
+      customAmounts: state.customAmounts,
+      percentages: state.percentages,
+      shares: state.shares,
+    );
   }
 
   Future<void> submit() async {

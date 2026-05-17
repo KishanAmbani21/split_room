@@ -2,6 +2,7 @@ enum ActivityType {
   expenseAdded,
   expenseUpdated,
   expenseDeleted,
+  groupDeleted,
   settlement,
   groupCreated,
   groupUpdated,
@@ -44,6 +45,7 @@ class ActivityLogItem {
 
   bool get isDeletedAction =>
       type == ActivityType.expenseDeleted ||
+      type == ActivityType.groupDeleted ||
       type == ActivityType.memberRemoved;
 }
 

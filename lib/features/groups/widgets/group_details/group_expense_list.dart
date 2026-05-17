@@ -87,9 +87,17 @@ class GroupExpenseList extends ConsumerWidget {
     }
   }
 
+  double get _filteredTotal =>
+      _filtered.fold<double>(0, (sum, e) => sum + e.amount);
+
+  bool get _showFullPaidAmount =>
+      filter == ExpenseFilter.paidByMe || filter == ExpenseFilter.othersPaid;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final items = _filtered;
+    final theme = Theme.of(context);
+    final brightness = theme.brightness;
 
     if (items.isEmpty) {
       return ListView(
@@ -104,19 +112,53 @@ class GroupExpenseList extends ConsumerWidget {
     return ListView.separated(
       physics: const AlwaysScrollableScrollPhysics(),
       padding: const EdgeInsets.only(top: 8, bottom: 100),
-      itemCount: items.length,
-      separatorBuilder: (_, __) => Divider(
-        height: 1,
-        indent: 72,
-        color: AppColors.glassBorder(Theme.of(context).brightness)
-            .withValues(alpha: 0.6),
-      ),
+      itemCount: items.length + (_showFullPaidAmount ? 1 : 0),
+      separatorBuilder: (_, index) {
+        if (_showFullPaidAmount && index == 0) {
+          return const SizedBox(height: 8);
+        }
+        return Divider(
+          height: 1,
+          indent: 72,
+          color: AppColors.glassBorder(brightness).withValues(alpha: 0.6),
+        );
+      },
       itemBuilder: (context, index) {
-        final expense = items[index];
+        if (_showFullPaidAmount && index == 0) {
+          final label = filter == ExpenseFilter.paidByMe
+              ? 'Total you paid'
+              : 'Total others paid';
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    label,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                Text(
+                  '${AppColors.currencySymbol}${_filteredTotal.toStringAsFixed(2)}',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: AppColors.primaryColor(brightness),
+                  ),
+                ),
+              ],
+            ),
+          );
+        }
+
+        final expenseIndex = _showFullPaidAmount ? index - 1 : index;
+        final expense = items[expenseIndex];
         return SplitwiseExpenseTile(
           expense: expense,
           currentUserId: currentUserId,
           members: data.members,
+          showFullPaidAmount: _showFullPaidAmount,
           onEdit: () => onEditExpense(expense),
           onDelete: () => _delete(context, ref, expense),
         );

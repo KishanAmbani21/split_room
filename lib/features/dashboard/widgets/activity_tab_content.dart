@@ -275,9 +275,9 @@ class _ActivityTimelineTile extends ConsumerWidget {
       if (!context.mounted) return;
       onRestored();
       showAppSnackBar(context, 'Item restored');
-    } on ActivityUndoException catch (e) {
+    } catch (e) {
       if (!context.mounted) return;
-      showAppSnackBar(context, e.message, isError: true);
+      showAppSnackBar(context, activityUndoErrorMessage(e), isError: true);
     }
   }
 

@@ -10,6 +10,7 @@ import '../models/group_details_data.dart';
 import '../models/group_expense.dart';
 import '../models/group_json_helpers.dart';
 import '../models/group_member_balance.dart';
+import '../models/group_settlement_item.dart';
 
 class GroupDetailsService {
   GroupDetailsService({
@@ -74,25 +75,63 @@ class GroupDetailsService {
   Future<void> deleteGroup({
     required String groupId,
     required String currentUserId,
+    required String deletedByName,
   }) async {
     final row = await _client
         .from('groups')
-        .select('created_by')
+        .select()
         .eq('id', groupId)
+        .isFilter('deleted_at', null)
         .maybeSingle();
     if (row == null) {
       throw const GroupDetailsException('Group not found.');
     }
 
-    final createdBy = row['created_by'] as String? ?? '';
+    final group = Map<String, dynamic>.from(row);
+    final createdBy = group['created_by'] as String? ?? '';
     if (createdBy != currentUserId) {
       throw const GroupDetailsException(
         'Only the group creator can delete this group.',
       );
     }
 
+    final memberIds = parseMemberIds(group);
+    final members = await _client
+        .from('group_members')
+        .select()
+        .eq('group_id', groupId);
+
+    final expenseRows = await _client
+        .from('expenses')
+        .select('*, expense_splits(*)')
+        .eq('group_id', groupId);
+
+    final expensesWithSplits = <Map<String, dynamic>>[];
+    for (final exp in expenseRows as List) {
+      final map = Map<String, dynamic>.from(exp as Map);
+      final splitsRaw = map['expense_splits'] as List? ?? [];
+      map['splits'] = splitsRaw;
+      map.remove('expense_splits');
+      expensesWithSplits.add(map);
+    }
+
+    final snapshot = {
+      'group': group,
+      'groupId': groupId,
+      'group_members': members,
+      'expenses': expensesWithSplits,
+    };
+
+    await _client.from('group_logs').insert({
+      'group_id': groupId,
+      'action_type': 'GROUP_DELETED',
+      'created_by': currentUserId,
+      'created_by_name': deletedByName,
+      'member_ids': memberIds,
+      'deleted_snapshot': snapshot,
+    });
+
     await _client.from('expenses').delete().eq('group_id', groupId);
-    await _client.from('group_logs').delete().eq('group_id', groupId);
     await _client.from('group_members').delete().eq('group_id', groupId);
     await _client.from('groups').delete().eq('id', groupId);
   }
@@ -132,6 +171,11 @@ class GroupDetailsService {
     final monthSpent = _thisMonthSpent(expenses);
     final memberBalances = _memberBalances(membersMeta, memberIds, expenses);
     final (youOwe, youGetBack) = _yourBalances(currentUserId, expenses);
+    final settlements = _pairwiseSettlements(
+      currentUserId,
+      expenses,
+      membersMeta,
+    );
     final expenseByMember = _expenseByMemberShare(expenses);
     final monthlySpending = _monthlySpending(expenses);
     final groupName = groupData['group_name'] as String? ??
@@ -162,6 +206,8 @@ class GroupDetailsService {
       pendingBalanceCount: pendingCount,
       youOwe: youOwe,
       youGetBack: youGetBack,
+      receiveFrom: settlements.$1,
+      payTo: settlements.$2,
       members: memberBalances,
       expenses: expenses,
       expenseByMember: expenseByMember,
@@ -201,6 +247,63 @@ class GroupDetailsService {
           return d != null && d.year == now.year && d.month == now.month;
         })
         .fold<double>(0, (t, e) => t + e.amount);
+  }
+
+  (List<GroupSettlementItem>, List<GroupSettlementItem>) _pairwiseSettlements(
+    String currentUserId,
+    List<GroupExpense> expenses,
+    Map<String, _MemberMeta> membersMeta,
+  ) {
+    final net = <String, double>{};
+
+    for (final expense in expenses) {
+      if (expense.paidBy == currentUserId) {
+        for (final split in expense.splits) {
+          if (split.userId == currentUserId || split.userId.isEmpty) continue;
+          net[split.userId] = (net[split.userId] ?? 0) + split.amount;
+        }
+      } else {
+        for (final split in expense.splits) {
+          if (split.userId != currentUserId) continue;
+          net[expense.paidBy] = (net[expense.paidBy] ?? 0) - split.amount;
+        }
+      }
+    }
+
+    final receiveFrom = <GroupSettlementItem>[];
+    final payTo = <GroupSettlementItem>[];
+
+    for (final entry in net.entries) {
+      if (entry.key == currentUserId) continue;
+      final meta = membersMeta[entry.key];
+      final name = meta?.name ?? 'Member';
+      final amount = entry.value.abs();
+      if (amount < 0.01) continue;
+
+      if (entry.value > 0) {
+        receiveFrom.add(
+          GroupSettlementItem(
+            userId: entry.key,
+            name: name,
+            amount: amount,
+            profileImage: meta?.profileImage,
+          ),
+        );
+      } else {
+        payTo.add(
+          GroupSettlementItem(
+            userId: entry.key,
+            name: name,
+            amount: amount,
+            profileImage: meta?.profileImage,
+          ),
+        );
+      }
+    }
+
+    receiveFrom.sort((a, b) => b.amount.compareTo(a.amount));
+    payTo.sort((a, b) => b.amount.compareTo(a.amount));
+    return (receiveFrom, payTo);
   }
 
   (double, double) _yourBalances(String uid, List<GroupExpense> expenses) {

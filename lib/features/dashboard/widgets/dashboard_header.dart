@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../shared/models/app_user.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../notifications/providers/notification_providers.dart';
+import '../../notifications/screens/notifications_screen.dart';
 import 'user_avatar.dart';
 
-class DashboardHeader extends StatelessWidget {
+class DashboardHeader extends ConsumerWidget {
   const DashboardHeader({
     required this.user,
     required this.onProfileTap,
@@ -23,12 +26,13 @@ class DashboardHeader extends StatelessWidget {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final primary = AppColors.primaryColor(theme.brightness);
     final muted = theme.brightness == Brightness.dark
         ? AppColors.darkTextMuted
         : AppColors.lightTextMuted;
+    final unreadAsync = ref.watch(unreadNotificationCountProvider(user.uid));
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -64,7 +68,22 @@ class DashboardHeader extends StatelessWidget {
             ],
           ),
         ),
-        const SizedBox(width: 12),
+        const SizedBox(width: 8),
+        unreadAsync.when(
+          data: (count) => _NotificationBell(
+            unreadCount: count,
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => NotificationsScreen(user: user),
+                ),
+              );
+            },
+          ),
+          loading: () => const _NotificationBell(unreadCount: 0),
+          error: (_, __) => const _NotificationBell(unreadCount: 0),
+        ),
+        const SizedBox(width: 4),
         UserAvatar(
           name: user.fullName,
           imageUrl: user.profileImageUrl,
@@ -72,6 +91,32 @@ class DashboardHeader extends StatelessWidget {
           onTap: onProfileTap,
         ),
       ],
+    );
+  }
+}
+
+class _NotificationBell extends StatelessWidget {
+  const _NotificationBell({
+    required this.unreadCount,
+    this.onTap,
+  });
+
+  final int unreadCount;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return IconButton(
+      onPressed: onTap,
+      icon: Badge(
+        isLabelVisible: unreadCount > 0,
+        label: Text('$unreadCount'),
+        child: Icon(
+          Icons.notifications_outlined,
+          color: AppColors.primaryColor(theme.brightness),
+        ),
+      ),
     );
   }
 }

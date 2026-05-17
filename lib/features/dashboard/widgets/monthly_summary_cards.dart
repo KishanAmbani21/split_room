@@ -17,12 +17,6 @@ class MonthlySummaryCards extends StatelessWidget {
         final wide = constraints.maxWidth >= 520;
         final cards = [
           _SummaryCard(
-            label: AppStrings.thisMonthYouPaid,
-            value: summary.monthYouPaid,
-            icon: Icons.payments_outlined,
-            accent: AppColors.primaryColor(Theme.of(context).brightness),
-          ),
-          _SummaryCard(
             label: AppStrings.thisMonthNeedToPay,
             value: summary.monthNeedToPay,
             icon: Icons.arrow_upward_rounded,
@@ -43,23 +37,13 @@ class MonthlySummaryCards extends StatelessWidget {
         ];
 
         if (wide) {
-          return Column(
+          return Row(
             children: [
-              Row(
-                children: [
-                  Expanded(child: cards[0]),
-                  const SizedBox(width: 10),
-                  Expanded(child: cards[1]),
-                ],
-              ),
-              const SizedBox(height: 10),
-              Row(
-                children: [
-                  Expanded(child: cards[2]),
-                  const SizedBox(width: 10),
-                  Expanded(child: cards[3]),
-                ],
-              ),
+              Expanded(child: cards[0]),
+              const SizedBox(width: 10),
+              Expanded(child: cards[1]),
+              const SizedBox(width: 10),
+              Expanded(child: cards[2]),
             ],
           );
         }

@@ -23,3 +23,12 @@ List<Map<String, dynamic>> memberDetailsToLegacyMaps(
 List<String> parseMemberIds(Map<String, dynamic> data) {
   return parseUuidList(data['member_ids'] ?? data['memberIds']);
 }
+
+String readGroupString(Map<String, dynamic> data, String snake, String camel,
+    [String fallback = '']) {
+  return data[snake] as String? ?? data[camel] as String? ?? fallback;
+}
+
+int readMemberCount(Map<String, dynamic> data) {
+  return parseMemberIds(data).length;
+}

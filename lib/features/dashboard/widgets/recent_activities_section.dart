@@ -67,6 +67,7 @@ class CompactActivityTile extends StatelessWidget {
       case ActivityType.expenseUpdated:
         return Icons.edit_outlined;
       case ActivityType.expenseDeleted:
+      case ActivityType.groupDeleted:
         return Icons.delete_outline;
       case ActivityType.groupUpdated:
         return Icons.edit_note_outlined;
@@ -92,6 +93,7 @@ class CompactActivityTile extends StatelessWidget {
       case ActivityType.groupUpdated:
         return AppColors.secondaryColor(brightness);
       case ActivityType.expenseDeleted:
+      case ActivityType.groupDeleted:
       case ActivityType.memberRemoved:
         return AppColors.errorColor(brightness);
       case ActivityType.activityRestored:

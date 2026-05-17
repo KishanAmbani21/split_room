@@ -12,6 +12,7 @@ class SplitwiseExpenseTile extends StatelessWidget {
     required this.expense,
     required this.currentUserId,
     required this.members,
+    this.showFullPaidAmount = false,
     this.onEdit,
     this.onDelete,
     super.key,
@@ -20,6 +21,8 @@ class SplitwiseExpenseTile extends StatelessWidget {
   final GroupExpense expense;
   final String currentUserId;
   final List<GroupMemberBalance> members;
+  /// When true, shows the full expense amount (for Paid by Me / Others Paid tabs).
+  final bool showFullPaidAmount;
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
 
@@ -38,13 +41,15 @@ class SplitwiseExpenseTile extends StatelessWidget {
         ? AppColors.darkTextMuted
         : AppColors.lightTextMuted;
     final impact = expense.balanceImpactFor(currentUserId);
-    final receives = impact > 0.01;
-    final owes = impact < -0.01;
-    final impactColor = receives
-        ? AppColors.successColor(brightness)
-        : owes
-            ? AppColors.errorColor(brightness)
-            : muted;
+    final receives = !showFullPaidAmount && impact > 0.01;
+    final owes = !showFullPaidAmount && impact < -0.01;
+    final impactColor = showFullPaidAmount
+        ? theme.colorScheme.onSurface
+        : receives
+            ? AppColors.successColor(brightness)
+            : owes
+                ? AppColors.errorColor(brightness)
+                : muted;
     final payer = _payer;
     final imagePath = payer?.profileImage ?? '';
     final hasImage =
@@ -105,7 +110,7 @@ class SplitwiseExpenseTile extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              if (receives || owes)
+              if (!showFullPaidAmount && (receives || owes))
                 Text(
                   receives ? AppStrings.owesYou : AppStrings.needToPayShort,
                   style: theme.textTheme.labelSmall?.copyWith(
@@ -114,9 +119,11 @@ class SplitwiseExpenseTile extends StatelessWidget {
                   ),
                 ),
               Text(
-                receives || owes
-                    ? '${receives ? '+' : '-'}${AppColors.currencySymbol}${impact.abs().toStringAsFixed(2)}'
-                    : '${AppColors.currencySymbol}${expense.amount.toStringAsFixed(2)}',
+                showFullPaidAmount
+                    ? '${AppColors.currencySymbol}${expense.amount.toStringAsFixed(2)}'
+                    : receives || owes
+                        ? '${receives ? '+' : '-'}${AppColors.currencySymbol}${impact.abs().toStringAsFixed(2)}'
+                        : '${AppColors.currencySymbol}${expense.amount.toStringAsFixed(2)}',
                 style: theme.textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w800,
                   color: impactColor,

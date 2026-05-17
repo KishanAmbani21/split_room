@@ -1,6 +1,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../groups/models/group_json_helpers.dart';
+import '../../groups/repositories/group_repository.dart';
 import '../../notifications/services/notification_service.dart';
 import '../models/add_expense_input.dart';
 import '../models/expense_group_member.dart';
@@ -9,11 +10,14 @@ class ExpenseService {
   ExpenseService({
     SupabaseClient? client,
     NotificationService? notificationService,
+    GroupRepository? groupRepository,
   })  : _client = client ?? Supabase.instance.client,
-        _notifications = notificationService;
+        _notifications = notificationService,
+        _groups = groupRepository ?? GroupRepository(client: client);
 
   final SupabaseClient _client;
   final NotificationService? _notifications;
+  final GroupRepository _groups;
 
   static const actionExpenseAdded = 'EXPENSE_ADDED';
   static const actionExpenseUpdated = 'EXPENSE_UPDATED';
@@ -39,10 +43,9 @@ class ExpenseService {
       },
     );
 
-    await _notify(
-      memberIds: input.memberIds,
-      excludeUserId: input.createdBy,
+    await _notifyGroup(
       groupId: input.groupId,
+      excludeUserId: input.createdBy,
       groupName: input.groupName,
       type: actionExpenseAdded,
       title: 'Expense Added',
@@ -112,10 +115,9 @@ class ExpenseService {
       'expense_data': input.toLogExpenseSnapshot(expenseId),
     });
 
-    await _notify(
-      memberIds: input.memberIds,
-      excludeUserId: input.createdBy,
+    await _notifyGroup(
       groupId: input.groupId,
+      excludeUserId: input.createdBy,
       groupName: input.groupName,
       type: actionExpenseUpdated,
       title: 'Expense Updated',
@@ -180,10 +182,9 @@ class ExpenseService {
       'deleted_snapshot': snapshot,
     });
 
-    await _notify(
-      memberIds: memberIds,
-      excludeUserId: deletedBy,
+    await _notifyGroup(
       groupId: groupId,
+      excludeUserId: deletedBy,
       groupName: groupName,
       groupImage: groupImage,
       type: actionExpenseDeleted,
@@ -267,10 +268,9 @@ class ExpenseService {
     };
   }
 
-  Future<void> _notify({
-    required List<String> memberIds,
-    required String excludeUserId,
+  Future<void> _notifyGroup({
     required String groupId,
+    required String excludeUserId,
     required String groupName,
     required String type,
     required String title,
@@ -280,12 +280,24 @@ class ExpenseService {
   }) async {
     final notifications = _notifications;
     if (notifications == null) return;
+
+    var image = groupImage;
+    if (image.isEmpty) {
+      final row = await _client
+          .from('groups')
+          .select('group_image')
+          .eq('id', groupId)
+          .maybeSingle();
+      image = row?['group_image'] as String? ?? '';
+    }
+
+    final memberIds = await _groups.fetchGroupMemberIds(groupId);
     await notifications.notifyGroupMembers(
       memberIds: memberIds,
       excludeUserId: excludeUserId,
       groupId: groupId,
       groupName: groupName,
-      groupImage: groupImage,
+      groupImage: image,
       type: type,
       title: title,
       message: message,

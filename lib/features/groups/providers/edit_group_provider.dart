@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../models/group_json_helpers.dart';
 import '../services/group_service.dart';
 import 'groups_providers.dart';
 
@@ -61,14 +62,11 @@ class EditGroupNotifier extends Notifier<EditGroupState> {
     _groupId = groupId;
     try {
       final data = await ref.read(groupServiceProvider).fetchGroup(groupId);
-      final members = data['memberDetails'] as List? ??
-          data['members'] as List? ??
-          [];
       state = state.copyWith(
-        groupName: data['groupName'] as String? ?? '',
-        description: data['description'] as String? ?? '',
-        groupImagePath: data['groupImage'] as String? ?? '',
-        memberCount: members.length,
+        groupName: readGroupString(data, 'group_name', 'groupName'),
+        description: readGroupString(data, 'description', 'description'),
+        groupImagePath: readGroupString(data, 'group_image', 'groupImage'),
+        memberCount: readMemberCount(data),
         isLoading: false,
       );
     } catch (_) {

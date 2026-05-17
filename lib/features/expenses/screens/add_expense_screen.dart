@@ -17,6 +17,7 @@ import '../widgets/expense_split_inputs.dart';
 import '../widgets/paid_by_selector.dart';
 import '../widgets/receipt_image_picker.dart';
 import '../widgets/split_members_section.dart';
+import '../widgets/split_preview_banner.dart';
 import '../widgets/split_type_selector.dart';
 import '../../groups/models/split_type.dart';
 
@@ -321,6 +322,14 @@ class _AddExpenseScreenState extends ConsumerState<AddExpenseScreen> {
                                   const SizedBox(height: 14),
                                   const SplitMembersSection(),
                                   const ExpenseSplitInputs(),
+                                  SplitPreviewBanner(
+                                    amount: state.parsedAmount,
+                                    splitType: state.splitType,
+                                    selectedMembers: state.selectedMembers,
+                                    customAmounts: state.customAmounts,
+                                    percentages: state.percentages,
+                                    shares: state.shares,
+                                  ),
                                 ],
                               ),
                             ),

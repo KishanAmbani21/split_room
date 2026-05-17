@@ -7,6 +7,7 @@ import '../../groups/models/split_type.dart';
 import '../models/add_expense_input.dart';
 import '../models/expense_group_member.dart';
 import '../services/expense_service.dart';
+import '../utils/expense_split_builder.dart';
 import 'expense_providers.dart';
 
 final addExpenseProvider =
@@ -46,6 +47,7 @@ class AddExpenseState {
     this.splitType = SplitType.equal,
     this.customAmounts = const {},
     this.percentages = const {},
+    this.shares = const {},
     this.isInitialized = false,
     this.isSubmitting = false,
     this.titleError,
@@ -68,6 +70,7 @@ class AddExpenseState {
   final SplitType splitType;
   final Map<String, double> customAmounts;
   final Map<String, double> percentages;
+  final Map<String, int> shares;
   final bool isInitialized;
   final bool isSubmitting;
   final String? titleError;
@@ -118,6 +121,17 @@ class AddExpenseState {
   double get remainingPercent =>
       double.parse((100 - percentTotal).toStringAsFixed(1));
 
+  int get totalShares => selectedMembers.fold<int>(
+        0,
+        (s, m) => s + (shares[m.uid] ?? 1).clamp(1, 99),
+      );
+
+  double get perShareAmount {
+    final total = parsedAmount;
+    if (total == null || totalShares <= 0) return 0;
+    return total / totalShares;
+  }
+
   bool get splitExceedsTotal {
     if (splitType != SplitType.custom || parsedAmount == null) return false;
     return customTotal > parsedAmount! + 0.001;
@@ -138,6 +152,7 @@ class AddExpenseState {
     SplitType? splitType,
     Map<String, double>? customAmounts,
     Map<String, double>? percentages,
+    Map<String, int>? shares,
     bool? isInitialized,
     bool? isSubmitting,
     String? titleError,
@@ -166,6 +181,7 @@ class AddExpenseState {
       splitType: splitType ?? this.splitType,
       customAmounts: customAmounts ?? this.customAmounts,
       percentages: percentages ?? this.percentages,
+      shares: shares ?? this.shares,
       isInitialized: isInitialized ?? this.isInitialized,
       isSubmitting: isSubmitting ?? this.isSubmitting,
       titleError: clearTitleError ? null : (titleError ?? this.titleError),
@@ -226,6 +242,12 @@ class AddExpenseNotifier extends Notifier<AddExpenseState> {
     final map = Map<String, double>.from(state.percentages);
     map[uid] = value;
     state = state.copyWith(percentages: map, clearSplitError: true);
+  }
+
+  void setShare(String uid, int value) {
+    final map = Map<String, int>.from(state.shares);
+    map[uid] = value.clamp(1, 99);
+    state = state.copyWith(shares: map, clearSplitError: true);
   }
 
   void toggleMember(String userId) {
@@ -290,6 +312,7 @@ class AddExpenseNotifier extends Notifier<AddExpenseState> {
     if (amount != null && state.selectedMemberIds.isNotEmpty) {
       switch (state.splitType) {
         case SplitType.equal:
+        case SplitType.shares:
           break;
         case SplitType.custom:
           if (state.splitExceedsTotal) {
@@ -326,15 +349,14 @@ class AddExpenseNotifier extends Notifier<AddExpenseState> {
   }
 
   List<ExpenseSplitEntry> _buildSplits(double amount) {
-    final members = state.selectedMembers;
-    switch (state.splitType) {
-      case SplitType.equal:
-        return buildEqualSplits(amount, members);
-      case SplitType.custom:
-        return buildCustomSplits(members, state.customAmounts);
-      case SplitType.percentage:
-        return buildPercentageSplits(amount, members, state.percentages);
-    }
+    return buildSplitsForType(
+      splitType: state.splitType,
+      amount: amount,
+      members: state.selectedMembers,
+      customAmounts: state.customAmounts,
+      percentages: state.percentages,
+      shares: state.shares,
+    );
   }
 
   Future<String> submit() async {

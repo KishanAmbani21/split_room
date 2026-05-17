@@ -17,8 +17,27 @@ class GroupRepository {
 
   Stream<List<GroupModel>> watchGroupsForUser(String userId) {
     return _realtime.watchUserGroups(userId).map(
-          (rows) => rows.map((r) => GroupModel.fromMap(r['id'] as String, r)).toList(),
+          (rows) => rows
+              .map((r) => GroupModel.fromMap(r['id'] as String, r))
+              .where(
+                (g) =>
+                    g.createdBy == userId || g.memberIds.contains(userId),
+              )
+              .toList(),
         );
+  }
+
+  /// All active member user IDs for a group (for notifications).
+  Future<List<String>> fetchGroupMemberIds(String groupId) async {
+    final rows = await _client
+        .from('group_members')
+        .select('user_id')
+        .eq('group_id', groupId)
+        .isFilter('deleted_at', null);
+    return (rows as List)
+        .map((r) => r['user_id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toList();
   }
 
   Future<bool> groupNameExists(

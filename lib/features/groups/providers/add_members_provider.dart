@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../models/group_json_helpers.dart';
 import '../models/selectable_user.dart';
 import '../services/group_service.dart';
 import 'groups_providers.dart';
@@ -65,7 +66,7 @@ class AddMembersNotifier extends Notifier<AddMembersState> {
   Future<void> initialize(String groupId, String currentUserId) async {
     _groupId = groupId;
     final group = await ref.read(groupServiceProvider).fetchGroup(groupId);
-    final memberIds = Set<String>.from(group['memberIds'] as List? ?? []);
+    final memberIds = Set<String>.from(parseMemberIds(group));
     final users = await ref.read(appUsersProvider(currentUserId).future);
     final available = users.where((u) => !memberIds.contains(u.uid)).toList();
     state = state.copyWith(users: available, isLoading: false);

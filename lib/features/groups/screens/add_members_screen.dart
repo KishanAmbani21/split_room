@@ -109,19 +109,34 @@ class _AddMembersScreenState extends ConsumerState<AddMembersScreen> {
                       ),
                     ),
                   Expanded(
-                    child: ListView.separated(
-                      padding: AppLayout.pagePadding(context),
-                      itemCount: state.filteredUsers.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 10),
-                      itemBuilder: (context, i) {
-                        final user = state.filteredUsers[i];
-                        return MemberUserCard(
-                          user: user,
-                          selected: state.selectedIds.contains(user.uid),
-                          onTap: () => notifier.toggle(user),
-                        );
-                      },
-                    ),
+                    child: state.filteredUsers.isEmpty
+                        ? Center(
+                            child: Padding(
+                              padding: AppLayout.pagePadding(context),
+                              child: Text(
+                                state.searchQuery.trim().isEmpty
+                                    ? 'Everyone is already in this group.'
+                                    : 'No users match your search.',
+                                textAlign: TextAlign.center,
+                                style: Theme.of(context).textTheme.bodyLarge,
+                              ),
+                            ),
+                          )
+                        : ListView.separated(
+                            padding: AppLayout.pagePadding(context),
+                            itemCount: state.filteredUsers.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 10),
+                            itemBuilder: (context, i) {
+                              final user = state.filteredUsers[i];
+                              return MemberUserCard(
+                                user: user,
+                                selected:
+                                    state.selectedIds.contains(user.uid),
+                                onTap: () => notifier.toggle(user),
+                              );
+                            },
+                          ),
                   ),
                   SafeArea(
                     child: Padding(

@@ -16,6 +16,7 @@ import '../providers/group_details_providers.dart';
 import '../services/group_details_service.dart';
 import '../widgets/group_details/add_group_expense_fab.dart';
 import '../widgets/group_details/group_balance_summary.dart';
+import '../widgets/group_details/group_settlement_list.dart';
 import '../widgets/group_details/group_expense_list.dart';
 import '../widgets/group_details/splitwise_tab_bar.dart';
 
@@ -121,6 +122,7 @@ class _GroupDetailsScreenState extends ConsumerState<GroupDetailsScreen>
                 onMore: () => _showOptions(context),
               ),
               GroupBalanceSummary(data: data),
+              GroupSettlementList(data: data),
               SplitwiseTabBar(controller: _tabController),
               const SizedBox(height: 8),
               Expanded(
@@ -221,7 +223,8 @@ class _GroupDetailsScreenState extends ConsumerState<GroupDetailsScreen>
           builder: (ctx) => AlertDialog(
             title: const Text('Delete group?'),
             content: Text(
-              'This will permanently delete "${data.groupName}" and all expenses.',
+              'This will delete "${data.groupName}" and all expenses. '
+              'You can restore it from Activity.',
             ),
             actions: [
               TextButton(
@@ -241,6 +244,9 @@ class _GroupDetailsScreenState extends ConsumerState<GroupDetailsScreen>
           await ref.read(groupDetailsServiceProvider).deleteGroup(
                 groupId: widget.groupId,
                 currentUserId: widget.user.uid,
+                deletedByName: widget.user.fullName.isEmpty
+                    ? 'You'
+                    : widget.user.fullName,
               );
           if (!context.mounted) return;
           showAppSnackBar(context, 'Group deleted');
@@ -285,7 +291,7 @@ class _GroupDetailsTopBar extends StatelessWidget {
               onPressed: onBack,
             ),
             IconButton(
-              icon: const Icon(Icons.add_rounded),
+              icon: const Icon(Icons.person_add_alt_1_rounded),
               tooltip: 'Add members',
               onPressed: onAddMembers,
             ),

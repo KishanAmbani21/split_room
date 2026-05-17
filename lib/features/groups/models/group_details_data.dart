@@ -2,6 +2,7 @@ import '../../dashboard/models/activity_log_item.dart';
 import '../../dashboard/models/monthly_spending.dart';
 import 'group_expense.dart';
 import 'group_member_balance.dart';
+import 'group_settlement_item.dart';
 
 class GroupDetailsData {
   const GroupDetailsData({
@@ -18,6 +19,8 @@ class GroupDetailsData {
     required this.pendingBalanceCount,
     required this.youOwe,
     required this.youGetBack,
+    required this.receiveFrom,
+    required this.payTo,
     required this.members,
     required this.expenses,
     required this.expenseByMember,
@@ -38,6 +41,10 @@ class GroupDetailsData {
   final int pendingBalanceCount;
   final double youOwe;
   final double youGetBack;
+  /// People who owe money to the current user.
+  final List<GroupSettlementItem> receiveFrom;
+  /// People the current user owes money to.
+  final List<GroupSettlementItem> payTo;
   final List<GroupMemberBalance> members;
   final List<GroupExpense> expenses;
   final Map<String, double> expenseByMember;

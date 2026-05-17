@@ -107,6 +107,16 @@ class _SplitTypeCard extends StatelessWidget {
                             : AppColors.lightTextMuted,
                       ),
                     ),
+                    if (selected) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        type.exampleHint,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: AppColors.primaryColor(brightness),
+                          fontStyle: FontStyle.italic,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),

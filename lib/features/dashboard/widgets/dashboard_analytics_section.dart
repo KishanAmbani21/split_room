@@ -36,16 +36,16 @@ class DashboardAnalyticsSection extends StatelessWidget {
             final wide = constraints.maxWidth >= 520;
             final statRow = [
               _MiniStat(
-                label: AppStrings.totalPaidByYou,
-                value: summary.monthYouPaid,
-                icon: Icons.payments_outlined,
-                color: AppColors.primary,
-              ),
-              _MiniStat(
                 label: AppStrings.totalPending,
                 value: summary.needToPay,
                 icon: Icons.schedule_rounded,
                 color: AppColors.error,
+              ),
+              _MiniStat(
+                label: AppStrings.totalWillReceive,
+                value: summary.willReceive,
+                icon: Icons.south_west_rounded,
+                color: AppColors.success,
               ),
             ];
 
@@ -200,6 +200,26 @@ class _MiniStat extends StatelessWidget {
   }
 }
 
+List<PieChartSectionData> _pieSections(List<MapEntry<String, double>> entries) {
+  final total = entries.fold<double>(0, (s, e) => s + e.value);
+  return [
+    for (var i = 0; i < entries.length; i++)
+      PieChartSectionData(
+        value: entries[i].value,
+        color: AppColors.chartColors[i % AppColors.chartColors.length],
+        radius: 48,
+        title: total > 0
+            ? '${((entries[i].value / total) * 100).round()}%'
+            : '',
+        titleStyle: const TextStyle(
+          color: Colors.white,
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+  ];
+}
+
 class _CategoryChart extends StatelessWidget {
   const _CategoryChart({required this.data});
 
@@ -214,7 +234,7 @@ class _CategoryChart extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'By category',
+            'Your share by category',
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w800,
                 ),
@@ -228,22 +248,7 @@ class _CategoryChart extends StatelessWidget {
                     PieChartData(
                       sectionsSpace: 2,
                       centerSpaceRadius: 36,
-                      sections: [
-                        for (var i = 0; i < entries.length; i++)
-                          PieChartSectionData(
-                            value: entries[i].value,
-                            color: AppColors.chartColors[i % AppColors.chartColors.length],
-                            radius: 48,
-                            title: entries[i].key.length > 6
-                                ? entries[i].key.substring(0, 5)
-                                : entries[i].key,
-                            titleStyle: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                      ],
+                      sections: _pieSections(entries),
                     ),
                   ),
           ),
@@ -271,7 +276,7 @@ class _MonthlyChart extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Monthly spending',
+            'Your monthly share',
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
                   fontWeight: FontWeight.w800,
                 ),

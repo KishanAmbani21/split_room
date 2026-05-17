@@ -96,6 +96,7 @@ class _ActivityTile extends StatelessWidget {
       case ActivityType.expenseUpdated:
         return Icons.edit_outlined;
       case ActivityType.expenseDeleted:
+      case ActivityType.groupDeleted:
         return Icons.delete_outline;
       case ActivityType.groupUpdated:
         return Icons.edit_note_outlined;
@@ -121,6 +122,7 @@ class _ActivityTile extends StatelessWidget {
       case ActivityType.groupUpdated:
         return (AppColors.purple, [AppColors.purple, AppColors.blue]);
       case ActivityType.expenseDeleted:
+      case ActivityType.groupDeleted:
       case ActivityType.memberRemoved:
         return (AppColors.coral, [AppColors.coral, AppColors.amber]);
       case ActivityType.activityRestored:

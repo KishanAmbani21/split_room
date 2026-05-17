@@ -4,7 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/layout/app_layout.dart';
 import '../../../shared/models/app_user.dart';
 import '../../../shared/theme/app_colors.dart';
+import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/widgets/glass_card.dart';
+import '../../notifications/providers/notification_providers.dart';
 import '../providers/dashboard_providers.dart';
 import 'animated_fade_slide.dart';
 import 'dashboard_header.dart';
@@ -28,6 +30,15 @@ class DashboardHomeContent extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final dashboardAsync = ref.watch(dashboardDataProvider(user.uid));
+
+    ref.listen(unreadNotificationCountProvider(user.uid), (previous, next) {
+      if (!next.hasValue) return;
+      final count = next.value!;
+      final prevCount = previous?.value;
+      if (prevCount != null && count > prevCount && context.mounted) {
+        showAppSnackBar(context, 'New notification');
+      }
+    });
 
     return dashboardAsync.when(
       loading: () => const Center(

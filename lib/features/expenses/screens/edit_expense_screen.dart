@@ -7,13 +7,13 @@ import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/widgets/glass_card.dart';
 import '../../groups/models/group_expense.dart';
-import '../../groups/models/split_type.dart';
 import '../../groups/widgets/gradient_create_button.dart';
 import '../../groups/widgets/premium_section_header.dart';
 import '../../groups/widgets/section_card.dart';
 import '../models/expense_group_member.dart';
 import '../providers/edit_expense_provider.dart';
 import '../services/expense_service.dart';
+import '../widgets/edit_expense_split_widgets.dart';
 
 class EditExpenseScreen extends ConsumerStatefulWidget {
   const EditExpenseScreen({
@@ -178,123 +178,17 @@ class _EditExpenseScreenState extends ConsumerState<EditExpenseScreen> {
                           children: [
                             const PremiumSectionHeader(
                               title: 'Paid by',
+                              subtitle: 'Who paid for this expense?',
                               accent: AppColors.cyan,
                             ),
                             const SizedBox(height: 10),
-                            ...state.members.map(
-                              (m) => RadioListTile<String>(
-                                value: m.uid,
-                                groupValue: state.paidByUserId,
-                                onChanged: state.isSubmitting
-                                    ? null
-                                    : (v) => notifier.setPaidBy(v!),
-                                title: Text(m.name),
-                              ),
-                            ),
+                            _EditPaidBySelector(),
                           ],
                         ),
                       ),
                       const SizedBox(height: 14),
                       SectionCard(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            const PremiumSectionHeader(
-                              title: 'Split',
-                              accent: AppColors.purple,
-                            ),
-                            const SizedBox(height: 10),
-                            Wrap(
-                              spacing: 8,
-                              children: SplitType.values.map((type) {
-                                final selected = state.splitType == type;
-                                return ChoiceChip(
-                                  label: Text(type.label),
-                                  selected: selected,
-                                  onSelected: state.isSubmitting
-                                      ? null
-                                      : (selected) {
-                                          if (selected) {
-                                            notifier.setSplitType(type);
-                                          }
-                                        },
-                                );
-                              }).toList(),
-                            ),
-                            const SizedBox(height: 12),
-                            Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: state.members.map((m) {
-                                final selected =
-                                    state.selectedMemberIds.contains(m.uid);
-                                return FilterChip(
-                                  label: Text(m.name),
-                                  selected: selected,
-                                  onSelected: state.isSubmitting
-                                      ? null
-                                      : (_) => notifier.toggleMember(m.uid),
-                                );
-                              }).toList(),
-                            ),
-                            if (state.splitType != SplitType.equal) ...[
-                              const SizedBox(height: 12),
-                              for (final member in state.selectedMembers)
-                                Padding(
-                                  padding: const EdgeInsets.only(bottom: 8),
-                                  child: TextFormField(
-                                    enabled: !state.isSubmitting,
-                                    keyboardType:
-                                        const TextInputType.numberWithOptions(
-                                      decimal: true,
-                                    ),
-                                    decoration: InputDecoration(
-                                      labelText: member.name,
-                                      suffixText: state.splitType ==
-                                              SplitType.percentage
-                                          ? '%'
-                                          : AppColors.currencySymbol,
-                                    ),
-                                    onChanged: (v) {
-                                      final parsed =
-                                          double.tryParse(v.trim()) ?? 0;
-                                      if (state.splitType ==
-                                          SplitType.percentage) {
-                                        notifier.setPercentage(
-                                          member.uid,
-                                          parsed,
-                                        );
-                                      } else {
-                                        notifier.setCustomAmount(
-                                          member.uid,
-                                          parsed,
-                                        );
-                                      }
-                                    },
-                                  ),
-                                ),
-                              Text(
-                                state.splitType == SplitType.percentage
-                                    ? 'Remaining: ${state.remainingPercent.toStringAsFixed(1)}%'
-                                    : 'Remaining: ${AppColors.currencySymbol}${state.remainingCustom.toStringAsFixed(2)}',
-                                style: Theme.of(context)
-                                    .textTheme
-                                    .labelMedium
-                                    ?.copyWith(
-                                      color: state.splitExceedsTotal
-                                          ? AppColors.error
-                                          : AppColors.primary,
-                                      fontWeight: FontWeight.w700,
-                                    ),
-                              ),
-                            ],
-                            if (state.splitError != null)
-                              Text(
-                                state.splitError!,
-                                style: const TextStyle(color: AppColors.error),
-                              ),
-                          ],
-                        ),
+                        child: const EditExpenseSplitBlock(),
                       ),
                       const SizedBox(height: 24),
                       GradientCreateButton(
@@ -309,6 +203,29 @@ class _EditExpenseScreenState extends ConsumerState<EditExpenseScreen> {
                 ),
               ),
       ),
+    );
+  }
+}
+
+class _EditPaidBySelector extends ConsumerWidget {
+  const _EditPaidBySelector();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final state = ref.watch(editExpenseProvider);
+    final notifier = ref.read(editExpenseProvider.notifier);
+
+    return Column(
+      children: state.members.map((m) {
+        return RadioListTile<String>(
+          value: m.uid,
+          groupValue: state.paidByUserId,
+          onChanged: state.isSubmitting
+              ? null
+              : (v) => notifier.setPaidBy(v!),
+          title: Text(m.name),
+        );
+      }).toList(),
     );
   }
 }
