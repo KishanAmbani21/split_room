@@ -1,5 +1,5 @@
 name: room_expense_manager
-description: Android-only room expense manager with Firebase authentication.
+description: Android room expense manager — Supabase data, Firebase FCM push.
 publish_to: 'none'
 
 version: 1.0.0+1
@@ -10,10 +10,9 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  cloud_firestore: ^6.4.1
-  firebase_auth: ^6.5.1
   firebase_core: ^4.9.0
   firebase_messaging: ^16.2.2
+  supabase_flutter: ^2.12.4
   flutter_riverpod: ^3.3.1
   shared_preferences: ^2.5.5
   crypto: ^3.0.7

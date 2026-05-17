@@ -1,19 +1,26 @@
 import 'dart:async';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../../shared/services/firestore_write_logger.dart';
+import '../../../core/services/fcm_push_service.dart';
+import '../../../core/services/supabase_realtime_service.dart';
 import '../../groups/models/create_group_input.dart';
 
 class NotificationService {
   NotificationService({
-    required FirebaseFirestore firestore,
+    SupabaseClient? client,
+    SupabaseRealtimeService? realtime,
+    FcmPushService? fcmPush,
     FirebaseMessaging? messaging,
-  })  : _firestore = firestore,
+  })  : _client = client ?? Supabase.instance.client,
+        _realtime = realtime ?? SupabaseRealtimeService(),
+        _fcmPush = fcmPush ?? FcmPushService(),
         _messaging = messaging ?? FirebaseMessaging.instance;
 
-  final FirebaseFirestore _firestore;
+  final SupabaseClient _client;
+  final SupabaseRealtimeService _realtime;
+  final FcmPushService _fcmPush;
   final FirebaseMessaging _messaging;
 
   String? _activeUserId;
@@ -23,8 +30,6 @@ class NotificationService {
 
   static const typeGroupCreated = 'GROUP_CREATED';
 
-  /// Initializes FCM once per app session per user. Does not write unless the
-  /// token actually changed.
   Future<void> initializeForUser(String userId) async {
     if (userId.isEmpty) return;
 
@@ -52,7 +57,6 @@ class NotificationService {
     });
   }
 
-  /// Call on logout so the next user gets a fresh init.
   void resetSession() {
     unawaited(_tokenRefreshSub?.cancel());
     _tokenRefreshSub = null;
@@ -62,28 +66,20 @@ class NotificationService {
   }
 
   Future<void> _persistFcmTokenIfNeeded(String userId, String token) async {
-    if (_lastPersistedToken == token && _activeUserId == userId) {
-      return;
-    }
+    if (_lastPersistedToken == token && _activeUserId == userId) return;
 
-    final ref = _firestore.collection('users').doc(userId);
-    final snap = await ref.get();
-    final existing = snap.data()?['fcmToken'] as String?;
+    final row = await _client
+        .from('users')
+        .select('fcm_token')
+        .eq('id', userId)
+        .maybeSingle();
+    final existing = row?['fcm_token'] as String?;
     if (existing == token) {
       _lastPersistedToken = token;
       return;
     }
 
-    await ref.set(
-      {'fcmToken': token},
-      SetOptions(merge: true),
-    );
-    FirestoreWriteLogger.log(
-      'set(merge)',
-      collection: 'users',
-      documentId: userId,
-      reason: 'FCM token update',
-    );
+    await _client.from('users').update({'fcm_token': token}).eq('id', userId);
     _lastPersistedToken = token;
   }
 
@@ -96,36 +92,17 @@ class NotificationService {
     required String groupId,
   }) async {
     const title = 'New Group Added';
-    final batch = _firestore.batch();
-    final now = FieldValue.serverTimestamp();
-    var count = 0;
-
-    for (final member in input.selectedMembers) {
-      final message =
-          '${input.creatorName} added you to ${input.groupName.trim()} group';
-      final ref = _firestore.collection('notifications').doc();
-      batch.set(ref, _notificationPayload(
-        refId: ref.id,
-        userId: member.uid,
-        groupId: groupId,
-        groupName: input.groupName.trim(),
-        groupImage: input.groupImagePath ?? '',
-        title: title,
-        message: message,
-        type: typeGroupCreated,
-        createdBy: input.createdBy,
-        createdAt: now,
-      ));
-      count++;
-    }
-
-    if (count == 0) return;
-
-    await batch.commit();
-    FirestoreWriteLogger.log(
-      'batch.set',
-      collection: 'notifications',
-      reason: 'group created ($count docs)',
+    final recipients = input.selectedMembers.map((m) => m.uid).toList();
+    await _createNotifications(
+      userIds: recipients,
+      groupId: groupId,
+      groupName: input.groupName.trim(),
+      groupImage: input.groupImagePath ?? '',
+      title: title,
+      message:
+          '${input.creatorName} added you to ${input.groupName.trim()} group',
+      type: typeGroupCreated,
+      createdBy: input.createdBy,
     );
   }
 
@@ -140,41 +117,22 @@ class NotificationService {
     required String createdBy,
     String groupImage = '',
   }) async {
-    final batch = _firestore.batch();
-    final now = FieldValue.serverTimestamp();
-    var count = 0;
-
-    for (final memberId in memberIds) {
-      if (memberId == excludeUserId) continue;
-      final ref = _firestore.collection('notifications').doc();
-      batch.set(ref, _notificationPayload(
-        refId: ref.id,
-        userId: memberId,
-        groupId: groupId,
-        groupName: groupName,
-        groupImage: groupImage,
-        title: title,
-        message: message,
-        type: type,
-        createdBy: createdBy,
-        createdAt: now,
-      ));
-      count++;
-    }
-
-    if (count == 0) return;
-
-    await batch.commit();
-    FirestoreWriteLogger.log(
-      'batch.set',
-      collection: 'notifications',
-      reason: '$type ($count docs)',
+    final targets =
+        memberIds.where((id) => id != excludeUserId && id.isNotEmpty).toList();
+    await _createNotifications(
+      userIds: targets,
+      groupId: groupId,
+      groupName: groupName,
+      groupImage: groupImage,
+      title: title,
+      message: message,
+      type: type,
+      createdBy: createdBy,
     );
   }
 
-  Map<String, dynamic> _notificationPayload({
-    required String refId,
-    required String userId,
+  Future<void> _createNotifications({
+    required List<String> userIds,
     required String groupId,
     required String groupName,
     required String groupImage,
@@ -182,95 +140,65 @@ class NotificationService {
     required String message,
     required String type,
     required String createdBy,
-    required Object createdAt,
-  }) {
-    return {
-      'notificationId': refId,
-      'userId': userId,
-      'groupId': groupId,
-      'groupName': groupName,
-      'groupImage': groupImage,
-      'title': title,
-      'message': message,
-      'type': type,
-      'actionType': type,
-      'isRead': false,
-      'read': false,
-      'createdBy': createdBy,
-      'createdAt': createdAt,
-    };
+  }) async {
+    if (userIds.isEmpty) return;
+
+    final rows = userIds
+        .map(
+          (userId) => {
+            'user_id': userId,
+            'group_id': groupId,
+            'group_name': groupName,
+            'group_image': groupImage,
+            'title': title,
+            'message': message,
+            'type': type,
+            'created_by': createdBy,
+            'is_read': false,
+          },
+        )
+        .toList();
+
+    await _client.from('notifications').insert(rows);
+
+    await _fcmPush.sendToUsers(
+      userIds: userIds,
+      title: title,
+      body: message,
+      data: {
+        'groupId': groupId,
+        'type': type,
+      },
+    );
   }
 
   Stream<List<AppNotificationDoc>> watchNotifications(String userId) {
-    return _firestore
-        .collection('notifications')
-        .where('userId', isEqualTo: userId)
-        .snapshots()
-        .map((snap) {
-      final docs = snap.docs
-          .map((d) => AppNotificationDoc(id: d.id, data: d.data()))
-          .toList();
-      docs.sort((a, b) {
-        final at = a.data['createdAt'];
-        final bt = b.data['createdAt'];
-        if (at == null && bt == null) return 0;
-        if (at == null) return 1;
-        if (bt == null) return -1;
-        if (at is Timestamp && bt is Timestamp) {
-          return bt.compareTo(at);
-        }
-        return 0;
-      });
-      return docs.take(50).toList();
-    });
+    return _realtime.watchUserNotifications(userId).map(
+          (rows) => rows
+              .map((d) => AppNotificationDoc(id: d['id'] as String, data: d))
+              .toList(),
+        );
   }
 
   Stream<int> watchUnreadCount(String userId) {
-    return _firestore
-        .collection('notifications')
-        .where('userId', isEqualTo: userId)
-        .snapshots()
-        .map((snap) {
-      return snap.docs.where((doc) {
-        final data = doc.data();
-        return data['isRead'] != true && data['read'] != true;
-      }).length;
-    });
+    return watchNotifications(userId).map(
+      (docs) => docs.where((d) => d.data['is_read'] != true).length,
+    );
   }
 
   Future<void> markRead(String notificationId) async {
-    await _firestore.collection('notifications').doc(notificationId).update({
-      'isRead': true,
-      'read': true,
-    });
-    FirestoreWriteLogger.log(
-      'update',
-      collection: 'notifications',
-      documentId: notificationId,
-      reason: 'mark read',
-    );
+    await _client
+        .from('notifications')
+        .update({'is_read': true})
+        .eq('id', notificationId);
   }
 
   Future<void> markAllRead(String userId) async {
-    final snap = await _firestore
-        .collection('notifications')
-        .where('userId', isEqualTo: userId)
-        .get();
-    final batch = _firestore.batch();
-    var count = 0;
-    for (final doc in snap.docs) {
-      final data = doc.data();
-      if (data['isRead'] == true || data['read'] == true) continue;
-      batch.update(doc.reference, {'isRead': true, 'read': true});
-      count++;
-    }
-    if (count == 0) return;
-    await batch.commit();
-    FirestoreWriteLogger.log(
-      'batch.update',
-      collection: 'notifications',
-      reason: 'mark all read ($count docs)',
-    );
+    await _client
+        .from('notifications')
+        .update({'is_read': true})
+        .eq('user_id', userId)
+        .eq('is_read', false);
   }
 }
 

@@ -1,5 +1,6 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/utils/json_helpers.dart';
 import '../models/activity_log_item.dart';
 import '../models/dashboard_data.dart';
 import '../models/dashboard_summary.dart';
@@ -10,35 +11,22 @@ import '../models/recent_expense_item.dart';
 import '../../expenses/services/expense_service.dart';
 
 class DashboardService {
-  const DashboardService({required FirebaseFirestore firestore})
-      : _firestore = firestore;
+  DashboardService({SupabaseClient? client})
+      : _client = client ?? Supabase.instance.client;
 
-  final FirebaseFirestore _firestore;
+  final SupabaseClient _client;
 
   Future<DashboardData> fetchDashboard(String uid) async {
-    final groupsSnap = await _firestore
-        .collection('groups')
-        .where('memberIds', arrayContains: uid)
-        .get();
+    final raw = await _client.rpc('get_dashboard_analytics');
+    final data = Map<String, dynamic>.from(raw as Map);
 
-    final groups = groupsSnap.docs.map(_parseGroup).toList();
-    final groupIds = groups.map((g) => g.groupId).toList();
+    final groups = (data['groups'] as List? ?? [])
+        .map((g) => _parseGroup(Map<String, dynamic>.from(g as Map)))
+        .toList();
+    final expenses = (data['expenses'] as List? ?? [])
+        .map((e) => _parseExpense(Map<String, dynamic>.from(e as Map)))
+        .toList();
     final groupMap = {for (final g in groups) g.groupId: g};
-
-    var expenses = <_ExpenseDoc>[];
-    if (groupIds.isNotEmpty) {
-      for (var i = 0; i < groupIds.length; i += 10) {
-        final chunk = groupIds.sublist(
-          i,
-          i + 10 > groupIds.length ? groupIds.length : i + 10,
-        );
-        final snap = await _firestore
-            .collection('expenses')
-            .where('groupId', whereIn: chunk)
-            .get();
-        expenses = [...expenses, ...snap.docs.map(_parseExpense)];
-      }
-    }
 
     final summary = _computeSummary(uid, expenses);
     final expenseByGroup = _expenseByGroup(expenses);
@@ -46,7 +34,10 @@ class DashboardService {
     final groupOverviews = _buildGroupOverviews(groups, expenses, uid);
     final monthlySpending = _monthlySpending(expenses);
     final pendingBalances = _pendingBalances(uid, expenses);
-    final activities = await _fetchActivities(uid, groupIds, groupMap);
+    final activities = _parseLogs(
+      data['logs'] as List? ?? [],
+      groupMap,
+    );
     final recentExpenses = _buildRecentExpenses(expenses, uid);
     final mostActiveGroup = _mostActiveGroup(groupOverviews);
     final topCategoryThisMonth = _topCategoryThisMonth(expenses);
@@ -65,12 +56,12 @@ class DashboardService {
     );
   }
 
-  GroupOverview _parseGroup(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data();
-    final memberIds = List<String>.from(data['memberIds'] as List? ?? []);
-    final updatedAt = (data['updatedAt'] as Timestamp?)?.toDate();
-    final lastExpenseAt = (data['lastExpenseAt'] as Timestamp?)?.toDate();
-    final createdAt = (data['createdAt'] as Timestamp?)?.toDate();
+  GroupOverview _parseGroup(Map<String, dynamic> data) {
+    final memberIds = parseUuidList(data['member_ids'] ?? data['memberIds']);
+    final updatedAt = parseDateTime(data['updated_at'] ?? data['updatedAt']);
+    final lastExpenseAt =
+        parseDateTime(data['last_expense_at'] ?? data['lastExpenseAt']);
+    final createdAt = parseDateTime(data['created_at'] ?? data['createdAt']);
     DateTime? lastActivity = updatedAt;
     if (lastExpenseAt != null &&
         (lastActivity == null || lastExpenseAt.isAfter(lastActivity))) {
@@ -78,43 +69,64 @@ class DashboardService {
     }
 
     return GroupOverview(
-      groupId: data['groupId'] as String? ?? doc.id,
-      groupName: data['groupName'] as String? ?? 'Group',
-      groupImage: data['groupImage'] as String? ?? '',
+      groupId: data['id'] as String? ?? data['groupId'] as String? ?? '',
+      groupName: data['group_name'] as String? ?? data['groupName'] as String? ?? 'Group',
+      groupImage: data['group_image'] as String? ?? data['groupImage'] as String? ?? '',
       memberCount: memberIds.length,
-      totalExpense: (data['totalExpense'] as num?)?.toDouble() ?? 0,
+      totalExpense: (data['total_expense'] as num? ?? data['totalExpense'] as num?)
+              ?.toDouble() ??
+          0,
       yourBalance: 0,
-      groupType: data['groupType'] as String? ?? 'room',
+      groupType: data['group_type'] as String? ?? data['groupType'] as String? ?? 'room',
       createdAt: createdAt,
       lastActivityAt: lastActivity ?? createdAt,
     );
   }
 
-  _ExpenseDoc _parseExpense(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data();
+  _ExpenseDoc _parseExpense(Map<String, dynamic> data) {
     final splitsRaw = data['splits'] as List? ?? [];
     final splits = splitsRaw.map((s) {
       final map = Map<String, dynamic>.from(s as Map);
       return _SplitPart(
-        userId: map['userId'] as String? ?? '',
-        userName: map['userName'] as String? ?? 'Member',
+        userId: map['userId'] as String? ?? map['user_id'] as String? ?? '',
+        userName: map['userName'] as String? ?? map['user_name'] as String? ?? 'Member',
         amount: (map['amount'] as num?)?.toDouble() ?? 0,
       );
     }).toList();
 
     final title = data['title'] as String? ?? 'Expense';
     return _ExpenseDoc(
-      id: doc.id,
-      groupId: data['groupId'] as String? ?? '',
-      groupName: data['groupName'] as String? ?? '',
+      id: data['id'] as String? ?? '',
+      groupId: data['group_id'] as String? ?? data['groupId'] as String? ?? '',
+      groupName: data['group_name'] as String? ?? data['groupName'] as String? ?? '',
       title: title,
       amount: (data['amount'] as num?)?.toDouble() ?? 0,
-      paidBy: data['paidBy'] as String? ?? '',
-      paidByName: data['paidByName'] as String? ?? 'Someone',
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+      paidBy: data['paid_by'] as String? ?? data['paidBy'] as String? ?? '',
+      paidByName: data['paid_by_name'] as String? ?? data['paidByName'] as String? ?? 'Someone',
+      createdAt: parseDateTime(data['created_at'] ?? data['createdAt']),
       category: data['category'] as String? ?? inferExpenseCategory(title),
       splits: splits,
     );
+  }
+
+  List<ActivityLogItem> _parseLogs(
+    List<dynamic> logsRaw,
+    Map<String, GroupOverview> groupMap,
+  ) {
+    final logs = <ActivityLogItem>[];
+
+    for (final raw in logsRaw) {
+      final data = Map<String, dynamic>.from(raw as Map);
+      logs.add(_parseLog(data, groupMap));
+    }
+
+    logs.sort((a, b) {
+      final at = a.timestamp ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final bt = b.timestamp ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return bt.compareTo(at);
+    });
+
+    return logs.take(20).toList();
   }
 
   Map<String, double> _expenseByCategory(List<_ExpenseDoc> expenses) {
@@ -349,63 +361,17 @@ class DashboardService {
     return results;
   }
 
-  Future<List<ActivityLogItem>> _fetchActivities(
-    String uid,
-    List<String> groupIds,
-    Map<String, GroupOverview> groupMap,
-  ) async {
-    final logs = <ActivityLogItem>[];
-
-    if (groupIds.isNotEmpty) {
-      for (var i = 0; i < groupIds.length; i += 10) {
-        final chunk = groupIds.sublist(
-          i,
-          i + 10 > groupIds.length ? groupIds.length : i + 10,
-        );
-        try {
-          final snap = await _firestore
-              .collection('group_logs')
-              .where('groupId', whereIn: chunk)
-              .orderBy('timestamp', descending: true)
-              .limit(15)
-              .get();
-
-          for (final doc in snap.docs) {
-            logs.add(_parseLog(doc, groupMap));
-          }
-        } catch (_) {
-          final snap = await _firestore
-              .collection('group_logs')
-              .where('groupId', whereIn: chunk)
-              .get();
-          for (final doc in snap.docs) {
-            logs.add(_parseLog(doc, groupMap));
-          }
-        }
-      }
-    }
-
-    logs.sort((a, b) {
-      final at = a.timestamp ?? DateTime.fromMillisecondsSinceEpoch(0);
-      final bt = b.timestamp ?? DateTime.fromMillisecondsSinceEpoch(0);
-      return bt.compareTo(at);
-    });
-
-    return logs.take(20).toList();
-  }
-
   ActivityLogItem _parseLog(
-    QueryDocumentSnapshot<Map<String, dynamic>> doc,
+    Map<String, dynamic> data,
     Map<String, GroupOverview> groupMap,
   ) {
-    final data = doc.data();
-    final action = data['actionType'] as String? ?? '';
-    final creator = data['creatorName'] as String? ?? 'Someone';
-    final groupId = data['groupId'] as String? ?? '';
+    final action = data['action_type'] as String? ?? data['actionType'] as String? ?? '';
+    final creator = data['created_by_name'] as String? ?? data['creatorName'] as String? ?? 'Someone';
+    final groupId = data['group_id'] as String? ?? data['groupId'] as String? ?? '';
     final group = groupMap[groupId];
     final groupName =
         group?.groupName ??
-        (data['groupData'] as Map?)?['groupName'] as String? ??
+        (data['group_data'] as Map?)?['groupName'] as String? ??
         'Group';
     final groupImage = group?.groupImage ?? '';
 
@@ -417,7 +383,7 @@ class DashboardService {
       case 'GROUP_CREATED':
         type = ActivityType.groupCreated;
         title = 'Group created';
-        subtitle = data['actionMessage'] as String? ??
+        subtitle = data['action_message'] as String? ??
             '$creator created this group';
         break;
       case 'GROUP_UPDATED':
@@ -428,7 +394,7 @@ class DashboardService {
       case 'EXPENSE_ADDED':
         type = ActivityType.expenseAdded;
         title = 'Expense added';
-        final addedData = data['expenseData'] as Map?;
+        final addedData = data['expense_data'] as Map?;
         final addedTitle = addedData?['title'] as String?;
         subtitle = addedTitle != null
             ? '$creator added "$addedTitle"'
@@ -437,7 +403,7 @@ class DashboardService {
       case 'EXPENSE_UPDATED':
         type = ActivityType.expenseUpdated;
         title = 'Expense updated';
-        final updatedData = data['expenseData'] as Map?;
+        final updatedData = data['expense_data'] as Map?;
         final updatedTitle = updatedData?['title'] as String?;
         subtitle = updatedTitle != null
             ? '$creator updated "$updatedTitle"'
@@ -446,7 +412,7 @@ class DashboardService {
       case 'EXPENSE_DELETED':
         type = ActivityType.expenseDeleted;
         title = 'Expense deleted';
-        final deletedExp = data['deletedSnapshot'] as Map?;
+        final deletedExp = data['deleted_snapshot'] as Map?;
         final deletedTitle = deletedExp?['title'] as String?;
         subtitle = deletedTitle != null
             ? '$creator deleted "$deletedTitle"'
@@ -460,7 +426,7 @@ class DashboardService {
       case 'MEMBER_REMOVED':
         type = ActivityType.memberRemoved;
         title = 'Member removed';
-        final removed = data['deletedSnapshot'] as Map?;
+        final removed = data['deleted_snapshot'] as Map?;
         final removedName = removed?['name'] as String? ?? 'A member';
         subtitle = '$creator removed $removedName';
         break;
@@ -481,18 +447,20 @@ class DashboardService {
     }
 
     final isRestored = data['restored'] == true;
-    final expenseData = data['expenseData'] as Map?;
-    final memberData = data['memberData'] as Map?;
-    final deletedSnapshot = data['deletedSnapshot'] as Map?;
+    final expenseData = data['expense_data'] as Map?;
+    final memberData = data['member_data'] as Map?;
+    final deletedSnapshot = data['deleted_snapshot'] as Map?;
     String? relatedId;
     double? amount;
 
     if (type == ActivityType.expenseAdded ||
         type == ActivityType.expenseUpdated) {
-      relatedId = expenseData?['expenseId'] as String?;
+      relatedId = expenseData?['expenseId'] as String? ??
+          expenseData?['expense_id'] as String?;
       amount = (expenseData?['amount'] as num?)?.toDouble();
     } else if (type == ActivityType.expenseDeleted) {
-      relatedId = deletedSnapshot?['expenseId'] as String?;
+      relatedId = deletedSnapshot?['expenseId'] as String? ??
+          deletedSnapshot?['id'] as String?;
       amount = (deletedSnapshot?['amount'] as num?)?.toDouble();
     } else if (type == ActivityType.memberJoined) {
       relatedId = memberData?['uid'] as String?;
@@ -505,10 +473,10 @@ class DashboardService {
             type == ActivityType.memberRemoved);
 
     return ActivityLogItem(
-      id: doc.id,
+      id: data['id'] as String? ?? '',
       title: title,
       subtitle: subtitle,
-      timestamp: (data['timestamp'] as Timestamp?)?.toDate(),
+      timestamp: parseDateTime(data['timestamp'] ?? data['created_at']),
       type: type,
       amount: amount,
       groupName: groupName,

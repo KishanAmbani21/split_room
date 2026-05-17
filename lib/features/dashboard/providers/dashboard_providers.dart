@@ -7,7 +7,7 @@ import '../services/dashboard_service.dart';
 export '../models/dashboard_data.dart';
 
 final dashboardServiceProvider = Provider<DashboardService>(
-  (ref) => DashboardService(firestore: ref.watch(firestoreProvider)),
+  (ref) => DashboardService(client: ref.watch(supabaseClientProvider)),
 );
 
 final dashboardNavIndexProvider = NotifierProvider<DashboardNavIndex, int>(
@@ -21,7 +21,6 @@ class DashboardNavIndex extends Notifier<int> {
   void select(int index) => state = index;
 }
 
-/// Cached while dashboard is open — avoids refetching on every tab switch.
 final dashboardDataProvider = FutureProvider.autoDispose
     .family<DashboardData, String>((ref, uid) {
   ref.keepAlive();

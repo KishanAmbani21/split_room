@@ -1,4 +1,4 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../../core/utils/json_helpers.dart';
 
 class AppNotification {
   const AppNotification({
@@ -30,18 +30,20 @@ class AppNotification {
   factory AppNotification.fromMap(String id, Map<String, dynamic> data) {
     return AppNotification(
       id: id,
-      userId: data['userId'] as String? ?? '',
-      groupId: data['groupId'] as String? ?? '',
-      groupName: data['groupName'] as String? ?? 'Group',
-      groupImage: data['groupImage'] as String? ?? '',
+      userId: data['user_id'] as String? ?? data['userId'] as String? ?? '',
+      groupId: data['group_id'] as String? ?? data['groupId'] as String? ?? '',
+      groupName: data['group_name'] as String? ??
+          data['groupName'] as String? ??
+          'Group',
+      groupImage: data['group_image'] as String? ??
+          data['groupImage'] as String? ??
+          '',
       title: data['title'] as String? ?? 'Notification',
       message: data['message'] as String? ?? '',
       type: data['type'] as String? ?? data['actionType'] as String? ?? '',
-      createdBy: data['createdBy'] as String? ?? '',
-      createdAt: data['createdAt'] is Timestamp
-          ? (data['createdAt'] as Timestamp).toDate()
-          : null,
-      isRead: data['isRead'] as bool? ?? data['read'] as bool? ?? false,
+      createdBy: data['created_by'] as String? ?? data['createdBy'] as String? ?? '',
+      createdAt: parseDateTime(data['created_at'] ?? data['createdAt']),
+      isRead: data['is_read'] as bool? ?? data['isRead'] as bool? ?? data['read'] as bool? ?? false,
     );
   }
 }

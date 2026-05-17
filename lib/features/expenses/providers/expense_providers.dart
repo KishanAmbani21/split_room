@@ -6,7 +6,7 @@ import '../services/expense_service.dart';
 
 final expenseServiceProvider = Provider<ExpenseService>(
   (ref) => ExpenseService(
-    firestore: ref.watch(firestoreProvider),
+    client: ref.watch(supabaseClientProvider),
     notificationService: ref.watch(notificationServiceProvider),
   ),
 );

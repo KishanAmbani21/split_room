@@ -1,13 +1,13 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../dashboard/models/activity_log_item.dart';
 
 /// Restores items deleted via [EXPENSE_DELETED] / [MEMBER_REMOVED] logs only.
 class ActivityUndoService {
-  const ActivityUndoService({required FirebaseFirestore firestore})
-      : _firestore = firestore;
+  ActivityUndoService({SupabaseClient? client})
+      : _client = client ?? Supabase.instance.client;
 
-  final FirebaseFirestore _firestore;
+  final SupabaseClient _client;
 
   static const actionRestored = 'ACTIVITY_RESTORED';
 
@@ -16,22 +16,25 @@ class ActivityUndoService {
     required String userId,
     required String userName,
   }) async {
-    final logRef = _firestore.collection('group_logs').doc(item.id);
-    final logSnap = await logRef.get();
-    if (!logSnap.exists) {
+    final logRow = await _client
+        .from('group_logs')
+        .select()
+        .eq('id', item.id)
+        .maybeSingle();
+    if (logRow == null) {
       throw const ActivityUndoException('Activity not found.');
     }
 
-    final data = logSnap.data()!;
+    final data = Map<String, dynamic>.from(logRow);
     if (data['restored'] == true) {
       throw const ActivityUndoException('Already restored.');
     }
 
     switch (item.type) {
       case ActivityType.expenseDeleted:
-        await _restoreExpense(data, userId, userName, logRef);
+        await _restoreExpense(data, userId, userName);
       case ActivityType.memberRemoved:
-        await _restoreMember(data, userId, userName, logRef);
+        await _restoreMember(data, userId, userName);
       default:
         throw const ActivityUndoException('Only deleted items can be restored.');
     }
@@ -41,131 +44,153 @@ class ActivityUndoService {
     Map<String, dynamic> logData,
     String userId,
     String userName,
-    DocumentReference<Map<String, dynamic>> logRef,
   ) async {
-    final snapshot = logData['deletedSnapshot'] as Map?;
+    final snapshot = logData['deleted_snapshot'] as Map?;
     if (snapshot == null) {
       throw const ActivityUndoException('Deleted expense data missing.');
     }
 
     final expense = Map<String, dynamic>.from(snapshot);
-    final expenseId = expense['expenseId'] as String? ?? '';
+    final expenseId = expense['id'] as String? ??
+        expense['expenseId'] as String? ??
+        '';
     if (expenseId.isEmpty) {
       throw const ActivityUndoException('Expense id missing.');
     }
 
-    final expenseRef = _firestore.collection('expenses').doc(expenseId);
-    final existing = await expenseRef.get();
-    if (existing.exists) {
+    final existing = await _client
+        .from('expenses')
+        .select('id')
+        .eq('id', expenseId)
+        .maybeSingle();
+    if (existing != null) {
       throw const ActivityUndoException('Expense already exists.');
     }
 
     final amount = (expense['amount'] as num?)?.toDouble() ?? 0;
-    final groupId = expense['groupId'] as String? ?? logData['groupId'] as String? ?? '';
-    final memberIds = List<String>.from(logData['memberIds'] as List? ?? []);
+    final groupId = expense['group_id'] as String? ??
+        expense['groupId'] as String? ??
+        logData['group_id'] as String? ??
+        '';
 
-    expense.remove('deletedAt');
-    if (expense['createdAt'] == null) {
-      expense['createdAt'] = FieldValue.serverTimestamp();
+    final insertExpense = <String, dynamic>{
+      'id': expenseId,
+      'group_id': groupId,
+      'group_name': expense['group_name'] ?? expense['groupName'],
+      'title': expense['title'],
+      'amount': amount,
+      'paid_by': expense['paid_by'] ?? expense['paidBy'],
+      'paid_by_name': expense['paid_by_name'] ?? expense['paidByName'],
+      'category': expense['category'] ?? 'Other',
+      'split_type': expense['split_type'] ?? expense['splitType'] ?? 'equal',
+      'notes': expense['notes'] ?? '',
+      'receipt_image': expense['receipt_image'] ?? expense['receiptImage'] ?? '',
+      'created_by': expense['created_by'] ?? expense['createdBy'] ?? userId,
+      'member_ids': expense['member_ids'] ?? expense['memberIds'] ?? [],
+    };
+
+    await _client.from('expenses').insert(insertExpense);
+
+    final splits = expense['splits'] as List? ?? [];
+    if (splits.isNotEmpty) {
+      await _client.from('expense_splits').insert(
+        splits.map((s) {
+          final m = Map<String, dynamic>.from(s as Map);
+          return {
+            'expense_id': expenseId,
+            'user_id': m['user_id'] ?? m['userId'],
+            'user_name': m['user_name'] ?? m['userName'],
+            'amount': m['amount'],
+          };
+        }).toList(),
+      );
     }
 
-    final restoreLogRef = _firestore.collection('group_logs').doc();
-    final batch = _firestore.batch()
-      ..set(expenseRef, expense)
-      ..update(_firestore.collection('groups').doc(groupId), {
-        'totalExpense': FieldValue.increment(amount),
-        'updatedAt': FieldValue.serverTimestamp(),
-      })
-      ..update(logRef, {
-        'restored': true,
-        'restoredAt': FieldValue.serverTimestamp(),
-      })
-      ..set(restoreLogRef, {
-        'logId': restoreLogRef.id,
-        'groupId': groupId,
-        'actionType': actionRestored,
-        'createdBy': userId,
-        'creatorName': userName,
-        'memberIds': memberIds,
-        'timestamp': FieldValue.serverTimestamp(),
-        'restoreOf': logRef.id,
-        'restoreType': 'EXPENSE_DELETED',
-      });
+    final group = await _client
+        .from('groups')
+        .select('total_expense')
+        .eq('id', groupId)
+        .single();
+    final current = (group['total_expense'] as num?)?.toDouble() ?? 0;
+    await _client.from('groups').update({
+      'total_expense': current + amount,
+    }).eq('id', groupId);
 
-    await batch.commit();
+    await _client.from('group_logs').update({'restored': true}).eq('id', logData['id']);
+
+    await _client.from('group_logs').insert({
+      'group_id': groupId,
+      'action_type': actionRestored,
+      'created_by': userId,
+      'created_by_name': userName,
+      'member_ids': logData['member_ids'] ?? [],
+    });
   }
 
   Future<void> _restoreMember(
     Map<String, dynamic> logData,
     String userId,
     String userName,
-    DocumentReference<Map<String, dynamic>> logRef,
   ) async {
-    final snapshot = logData['deletedSnapshot'] as Map?;
+    final snapshot = logData['deleted_snapshot'] as Map?;
     if (snapshot == null) {
       throw const ActivityUndoException('Deleted member data missing.');
     }
 
     final member = Map<String, dynamic>.from(snapshot);
-    final memberUid = member['uid'] as String? ?? '';
-    if (memberUid.isEmpty) {
-      throw const ActivityUndoException('Member id missing.');
-    }
+    final uid = member['uid'] as String? ?? '';
+    final groupId = logData['group_id'] as String? ?? '';
 
-    final groupId = logData['groupId'] as String? ?? '';
-    final groupRef = _firestore.collection('groups').doc(groupId);
-    final groupSnap = await groupRef.get();
-    if (!groupSnap.exists) {
-      throw const ActivityUndoException('Group not found.');
-    }
-
-    final data = groupSnap.data()!;
-    final memberIds = List<String>.from(data['memberIds'] as List? ?? []);
-    if (memberIds.contains(memberUid)) {
-      throw const ActivityUndoException('Member already in group.');
-    }
-
-    memberIds.add(memberUid);
-    final members = List<Map<String, dynamic>>.from(
-      (data['memberDetails'] as List? ?? data['members'] as List? ?? []).map(
-        (m) => Map<String, dynamic>.from(m as Map),
-      ),
+    final group = await _client
+        .from('groups')
+        .select()
+        .eq('id', groupId)
+        .single();
+    final memberIds = List<String>.from(
+      (group['member_ids'] as List?)?.map((e) => e.toString()) ?? [],
     );
-    members.add(member);
+    if (!memberIds.contains(uid)) {
+      memberIds.add(uid);
+    }
 
-    final restoreLogRef = _firestore.collection('group_logs').doc();
-    final batch = _firestore.batch()
-      ..update(groupRef, {
-        'memberIds': memberIds,
-        'memberDetails': members,
-        'members': members,
-        'updatedAt': FieldValue.serverTimestamp(),
-      })
-      ..update(logRef, {
-        'restored': true,
-        'restoredAt': FieldValue.serverTimestamp(),
-      })
-      ..set(restoreLogRef, {
-        'logId': restoreLogRef.id,
-        'groupId': groupId,
-        'actionType': actionRestored,
-        'createdBy': userId,
-        'creatorName': userName,
-        'memberIds': memberIds,
-        'timestamp': FieldValue.serverTimestamp(),
-        'restoreOf': logRef.id,
-        'restoreType': 'MEMBER_REMOVED',
-      });
+    final details = List<Map<String, dynamic>>.from(
+      (group['member_details'] as List?)?.map(
+            (e) => Map<String, dynamic>.from(e as Map),
+          ) ??
+          [],
+    );
+    if (!details.any((m) => m['uid'] == uid)) {
+      details.add(member);
+    }
 
-    await batch.commit();
+    await _client.from('groups').update({
+      'member_ids': memberIds,
+      'member_details': details,
+    }).eq('id', groupId);
+
+    await _client.from('group_members').upsert({
+      'group_id': groupId,
+      'user_id': uid,
+      'user_name': member['name'] ?? 'Member',
+      'user_email': member['email'] ?? '',
+      'added_by': userId,
+    });
+
+    await _client.from('group_logs').update({'restored': true}).eq('id', logData['id']);
+
+    await _client.from('group_logs').insert({
+      'group_id': groupId,
+      'action_type': actionRestored,
+      'created_by': userId,
+      'created_by_name': userName,
+      'member_ids': memberIds,
+    });
   }
 }
 
 class ActivityUndoException implements Exception {
   const ActivityUndoException(this.message);
-
   final String message;
-
   @override
   String toString() => message;
 }

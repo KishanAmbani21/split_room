@@ -1,5 +1,6 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../core/utils/json_helpers.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../../shared/models/app_user.dart';
@@ -215,11 +216,13 @@ class EditExpenseNotifier extends Notifier<EditExpenseState> {
       title: data['title'] as String? ?? '',
       amountText: amount.toStringAsFixed(amount == amount.roundToDouble() ? 0 : 2),
       notes: data['notes'] as String? ?? '',
-      paidByUserId: data['paidBy'] as String? ?? context.user.uid,
+      paidByUserId: data['paidBy'] as String? ??
+          data['paid_by'] as String? ??
+          context.user.uid,
       selectedMemberIds: splitMembers.toSet(),
       receiptImagePath: data['receiptImage'] as String?,
-      expenseDate: (data['expenseDate'] as Timestamp?)?.toDate() ??
-          (data['createdAt'] as Timestamp?)?.toDate(),
+      expenseDate: parseDateTime(data['expenseDate'] ?? data['expense_date']) ??
+          parseDateTime(data['createdAt'] ?? data['created_at']),
       splitType: splitType,
       customAmounts: customAmounts,
       percentages: percentages,

@@ -1,8 +1,8 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../notifications/services/notification_service.dart';
 import '../models/create_group_input.dart';
-import '../models/group_firestore_helpers.dart';
+import '../models/group_json_helpers.dart';
 import '../models/group_member_detail.dart';
 import '../models/group_model.dart';
 import '../models/selectable_user.dart';
@@ -11,11 +11,14 @@ import '../repositories/group_repository.dart';
 class GroupService {
   GroupService({
     required GroupRepository repository,
+    SupabaseClient? client,
     NotificationService? notificationService,
   })  : _repository = repository,
+        _client = client ?? Supabase.instance.client,
         _notifications = notificationService;
 
   final GroupRepository _repository;
+  final SupabaseClient _client;
   final NotificationService? _notifications;
 
   static const actionGroupCreated = 'GROUP_CREATED';
@@ -60,37 +63,29 @@ class GroupService {
       throw const GroupServiceException('Group name already exists');
     }
 
-    final firestore = FirebaseFirestore.instance;
-    final ref = firestore.collection('groups').doc(groupId);
     final updates = <String, dynamic>{
-      'groupName': groupName.trim(),
-      'groupNameLower': groupName.trim().toLowerCase(),
+      'group_name': groupName.trim(),
+      'group_name_lower': groupName.trim().toLowerCase(),
       'description': description.trim(),
-      'updatedAt': FieldValue.serverTimestamp(),
     };
     if (groupImagePath != null) {
-      updates['groupImage'] = groupImagePath;
+      updates['group_image'] = groupImagePath;
     }
-    await ref.update(updates);
 
-    final snap = await ref.get();
-    final data = snap.data() ?? {};
-    final memberIds = List<String>.from(data['memberIds'] as List? ?? []);
-    final resolvedName =
-        data['groupName'] as String? ?? groupName.trim();
-    final groupImage = data['groupImage'] as String? ?? '';
+    await _client.from('groups').update(updates).eq('id', groupId);
 
-    final logRef = firestore.collection('group_logs').doc();
-    await logRef.set({
-      'logId': logRef.id,
-      'groupId': groupId,
-      'actionType': actionGroupUpdated,
-      'actionMessage': 'Group "$resolvedName" was updated',
-      'createdBy': updatedBy,
-      'createdByName': 'Member',
-      'memberIds': memberIds,
-      'createdAt': FieldValue.serverTimestamp(),
-      'timestamp': FieldValue.serverTimestamp(),
+    final data = await _repository.fetchGroup(groupId);
+    final memberIds = parseMemberIds(data);
+    final resolvedName = data['group_name'] as String? ?? groupName.trim();
+    final groupImage = data['group_image'] as String? ?? '';
+
+    await _client.from('group_logs').insert({
+      'group_id': groupId,
+      'action_type': actionGroupUpdated,
+      'action_message': 'Group "$resolvedName" was updated',
+      'created_by': updatedBy,
+      'created_by_name': 'Member',
+      'member_ids': memberIds,
     });
 
     await _notifications?.notifyGroupMembers(
@@ -114,19 +109,9 @@ class GroupService {
   }) async {
     if (newMembers.isEmpty) return;
 
-    final firestore = FirebaseFirestore.instance;
-    final groupRef = firestore.collection('groups').doc(groupId);
-    final snap = await groupRef.get();
-    if (!snap.exists) {
-      throw const GroupServiceException('Group not found.');
-    }
-
-    final data = snap.data()!;
-    final memberIds = List<String>.from(data['memberIds'] as List? ?? []);
+    final data = await _repository.fetchGroup(groupId);
+    var memberIds = List<String>.from(parseMemberIds(data));
     final details = parseMemberDetails(data);
-
-    final batch = firestore.batch();
-    final now = FieldValue.serverTimestamp();
     final newMemberMaps = <Map<String, dynamic>>[];
 
     for (final user in newMembers) {
@@ -136,38 +121,30 @@ class GroupService {
       details.add(GroupMemberDetail.fromMap(map));
       newMemberMaps.add(map);
 
-      final logRef = firestore.collection('group_logs').doc();
-      batch.set(logRef, {
-        'logId': logRef.id,
-        'groupId': groupId,
-        'actionType': actionMemberJoined,
-        'actionMessage': '$addedByName added ${user.name}',
-        'createdBy': addedBy,
-        'createdByName': addedByName,
-        'memberIds': memberIds,
-        'createdAt': now,
-        'timestamp': now,
-        'memberData': user.toMemberMap(),
+      await _client.from('group_logs').insert({
+        'group_id': groupId,
+        'action_type': actionMemberJoined,
+        'action_message': '$addedByName added ${user.name}',
+        'created_by': addedBy,
+        'created_by_name': addedByName,
+        'member_ids': memberIds,
+        'member_data': user.toMemberMap(),
       });
     }
 
-    final memberMaps = memberDetailsToLegacyMaps(details);
-    batch.update(groupRef, {
-      'memberIds': memberIds,
-      'memberDetails': memberMaps,
-      'members': memberMaps,
-      'updatedAt': now,
-    });
+    await _client.from('groups').update({
+      'member_ids': memberIds,
+      'member_details': memberDetailsToLegacyMaps(details),
+    }).eq('id', groupId);
 
-    await batch.commit();
     await _repository.addGroupMemberRecords(
       groupId: groupId,
       addedBy: addedBy,
       newMembers: newMemberMaps,
     );
 
-    final groupName = data['groupName'] as String? ?? 'Group';
-    final groupImage = data['groupImage'] as String? ?? '';
+    final groupName = data['group_name'] as String? ?? 'Group';
+    final groupImage = data['group_image'] as String? ?? '';
     final names = newMembers.map((m) => m.name).join(', ');
     await _notifications?.notifyGroupMembers(
       memberIds: memberIds,
@@ -194,15 +171,11 @@ class GroupServiceException implements Exception {
 
 String groupServiceErrorMessage(Object error) {
   if (error is GroupServiceException) return error.message;
-  if (error is FirebaseException) {
-    switch (error.code) {
-      case 'permission-denied':
-        return 'Permission denied. Deploy Firestore rules and try again.';
-      case 'unavailable':
-        return 'Firestore is unavailable. Check your connection.';
-      default:
-        return error.message ?? 'Could not complete request.';
+  if (error is PostgrestException) {
+    if (error.code == '42501') {
+      return 'Permission denied. Check Supabase RLS policies.';
     }
+    return error.message;
   }
   return 'Could not complete request. Please try again.';
 }

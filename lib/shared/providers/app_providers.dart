@@ -1,8 +1,11 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../core/supabase/supabase_client.dart';
+import '../../core/services/supabase_auth_service.dart';
+import '../../core/services/supabase_realtime_service.dart';
+import '../../core/services/fcm_push_service.dart';
 import '../models/app_user.dart';
 import '../../features/auth/data/auth_repository.dart';
 
@@ -28,33 +31,42 @@ class ThemeModeController extends Notifier<bool> {
   }
 }
 
-final firebaseAuthProvider = Provider<FirebaseAuth>(
-  (_) => FirebaseAuth.instance,
+/// Injected Supabase client — use in repositories / services (data layer).
+final supabaseClientProvider = Provider<SupabaseClient>(
+  (ref) => AppSupabase.client,
 );
 
-final firestoreProvider = Provider<FirebaseFirestore>(
-  (_) => FirebaseFirestore.instance,
+final supabaseAuthServiceProvider = Provider<SupabaseAuthService>(
+  (ref) => SupabaseAuthService(client: ref.watch(supabaseClientProvider)),
+);
+
+final supabaseRealtimeServiceProvider = Provider<SupabaseRealtimeService>(
+  (ref) => SupabaseRealtimeService(client: ref.watch(supabaseClientProvider)),
+);
+
+final fcmPushServiceProvider = Provider<FcmPushService>(
+  (ref) => FcmPushService(client: ref.watch(supabaseClientProvider)),
 );
 
 final authRepositoryProvider = Provider<AuthRepository>(
-  (ref) => AuthRepository(
-    auth: ref.watch(firebaseAuthProvider),
-    firestore: ref.watch(firestoreProvider),
-  ),
+  (ref) => AuthRepository(authService: ref.watch(supabaseAuthServiceProvider)),
 );
 
-final authStateProvider = StreamProvider<User?>(
-  (ref) => ref.watch(firebaseAuthProvider).authStateChanges(),
-);
+final authStateProvider = StreamProvider<Session?>((ref) {
+  return ref
+      .watch(supabaseAuthServiceProvider)
+      .authStateChanges
+      .map((state) => state.session);
+});
 
-final userDocumentProvider = StreamProvider.family<AppUser?, String>((
+final currentUserIdProvider = Provider<String?>((ref) {
+  return ref.watch(authStateProvider).value?.user.id;
+});
+
+/// Profile for dashboard — waits for session, creates row if DB trigger missed it.
+final userDocumentProvider = StreamProvider.autoDispose.family<AppUser?, String>((
   ref,
   uid,
 ) {
-  return ref
-      .watch(firestoreProvider)
-      .collection('users')
-      .doc(uid)
-      .snapshots()
-      .map((doc) => doc.exists ? AppUser.fromSnapshot(doc) : null);
+  return ref.watch(supabaseAuthServiceProvider).watchUserProfile(uid);
 });

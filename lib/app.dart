@@ -31,15 +31,16 @@ class AppEntry extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return ref
-        .watch(authStateProvider)
-        .when(
-          data: (user) => user == null
-              ? const LoginScreen()
-              : DashboardScreen(uid: user.uid),
+    return ref.watch(authStateProvider).when(
+          data: (session) {
+            final userId = session?.user.id;
+            if (userId == null) return const LoginScreen();
+            return DashboardScreen(uid: userId);
+          },
           error: (error, stackTrace) => const LoginScreen(),
-          loading: () =>
-              const Scaffold(body: Center(child: CircularProgressIndicator())),
+          loading: () => const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          ),
         );
   }
 }

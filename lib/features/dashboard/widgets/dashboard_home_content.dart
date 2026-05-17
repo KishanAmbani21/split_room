@@ -34,7 +34,7 @@ class DashboardHomeContent extends ConsumerWidget {
         child: CircularProgressIndicator(),
       ),
       error: (error, _) => _DashboardError(
-        message: 'Could not load dashboard. Check connection and Firestore rules.',
+        message: 'Could not load dashboard. Check connection and Supabase RLS.',
         onRetry: () => ref.invalidate(dashboardDataProvider(user.uid)),
       ),
       data: (data) {

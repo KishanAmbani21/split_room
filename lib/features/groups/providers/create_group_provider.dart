@@ -1,4 +1,3 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
@@ -167,7 +166,7 @@ class CreateGroupNotifier extends Notifier<CreateGroupState> {
         selectedMembers: selectedMembers,
       );
       return await ref.read(groupServiceProvider).createGroup(input);
-    } on FirebaseException catch (error) {
+    } catch (error) {
       throw GroupServiceException(groupServiceErrorMessage(error));
     } finally {
       state = state.copyWith(isSubmitting: false);

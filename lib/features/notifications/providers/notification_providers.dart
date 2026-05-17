@@ -4,10 +4,13 @@ import '../../../shared/providers/app_providers.dart';
 import '../services/notification_service.dart';
 
 final notificationServiceProvider = Provider<NotificationService>(
-  (ref) => NotificationService(firestore: ref.watch(firestoreProvider)),
+  (ref) => NotificationService(
+    client: ref.watch(supabaseClientProvider),
+    realtime: ref.watch(supabaseRealtimeServiceProvider),
+    fcmPush: ref.watch(fcmPushServiceProvider),
+  ),
 );
 
-/// Runs FCM setup once per [userId] until provider is disposed (logout).
 final notificationInitProvider = FutureProvider.autoDispose
     .family<void, String>((ref, userId) async {
   await ref.read(notificationServiceProvider).initializeForUser(userId);

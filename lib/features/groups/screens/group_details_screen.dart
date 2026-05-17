@@ -10,6 +10,7 @@ import '../../expenses/edit_expense_route.dart';
 import '../add_members_route.dart';
 import '../edit_group_route.dart';
 import '../../dashboard/providers/dashboard_providers.dart';
+import '../models/group_details_data.dart';
 import '../models/group_expense.dart';
 import '../providers/group_details_providers.dart';
 import '../services/group_details_service.dart';

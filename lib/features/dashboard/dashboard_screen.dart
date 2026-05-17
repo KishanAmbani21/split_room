@@ -44,18 +44,20 @@ class DashboardScreen extends ConsumerWidget {
       loading: () => const Scaffold(
         body: Center(child: CircularProgressIndicator()),
       ),
-      error: (error, stackTrace) => const Scaffold(
+      error: (error, stackTrace) => Scaffold(
         body: _MessageView(
           title: 'Unable to load profile',
           message: 'Please check your connection and try again.',
+          onRetry: () => ref.invalidate(userDocumentProvider(uid)),
         ),
       ),
       data: (user) {
         if (user == null) {
-          return const Scaffold(
+          return Scaffold(
             body: _MessageView(
               title: 'Profile not found',
-              message: 'Your Firestore user document does not exist.',
+              message: 'Could not load your profile. Pull to retry or log in again.',
+              onRetry: () => ref.invalidate(userDocumentProvider(uid)),
             ),
           );
         }
@@ -135,10 +137,15 @@ class _DashboardShell extends StatelessWidget {
 }
 
 class _MessageView extends StatelessWidget {
-  const _MessageView({required this.title, required this.message});
+  const _MessageView({
+    required this.title,
+    required this.message,
+    this.onRetry,
+  });
 
   final String title;
   final String message;
+  final VoidCallback? onRetry;
 
   @override
   Widget build(BuildContext context) {
@@ -153,6 +160,13 @@ class _MessageView extends StatelessWidget {
             Text(title, style: Theme.of(context).textTheme.titleLarge),
             const SizedBox(height: 8),
             Text(message, textAlign: TextAlign.center),
+            if (onRetry != null) ...[
+              const SizedBox(height: 20),
+              FilledButton(
+                onPressed: onRetry,
+                child: const Text('Retry'),
+              ),
+            ],
           ],
         ),
       ),

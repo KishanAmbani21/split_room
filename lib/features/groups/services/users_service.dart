@@ -1,26 +1,29 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../models/selectable_user.dart';
 
 class UsersService {
-  const UsersService({required FirebaseFirestore firestore}) : _firestore = firestore;
+  UsersService({SupabaseClient? client})
+      : _client = client ?? Supabase.instance.client;
 
-  final FirebaseFirestore _firestore;
+  final SupabaseClient _client;
 
   Future<List<SelectableUser>> fetchAppUsers({required String excludeUid}) async {
-    final snapshot = await _firestore.collection('users').get();
+    final rows = await _client
+        .from('users')
+        .select()
+        .isFilter('deleted_at', null)
+        .order('full_name');
 
-    final users = snapshot.docs.map((doc) {
-      final data = doc.data();
+    final users = (rows as List).map((row) {
+      final data = Map<String, dynamic>.from(row as Map);
       return SelectableUser(
-        uid: data['uid'] as String? ?? doc.id,
-        name: data['full_name'] as String? ?? data['name'] as String? ?? 'User',
+        uid: data['id'] as String? ?? '',
+        name: data['full_name'] as String? ?? 'User',
         email: data['email'] as String? ?? '',
-        profileImageUrl: data['profile_image'] as String? ??
-            data['profileImage'] as String? ??
-            data['avatar_url'] as String?,
+        profileImageUrl: data['profile_image_url'] as String?,
       );
-    }).where((user) => user.uid != excludeUid).toList();
+    }).where((user) => user.uid != excludeUid && user.uid.isNotEmpty).toList();
 
     users.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return users;

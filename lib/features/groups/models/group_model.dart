@@ -1,8 +1,6 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
-
 import '../../dashboard/models/group_overview.dart';
 import 'group_member_detail.dart';
-import 'group_firestore_helpers.dart';
+import 'group_json_helpers.dart';
 
 class GroupModel {
   const GroupModel({
@@ -44,29 +42,36 @@ class GroupModel {
     return lastExpenseAt ?? updatedAt ?? createdAt;
   }
 
-  factory GroupModel.fromFirestore(
-    DocumentSnapshot<Map<String, dynamic>> doc,
-  ) {
-    final data = doc.data() ?? {};
-    return GroupModel.fromMap(doc.id, data);
-  }
-
   factory GroupModel.fromMap(String id, Map<String, dynamic> data) {
     final members = parseMemberDetails(data);
     return GroupModel(
-      groupId: data['groupId'] as String? ?? id,
-      groupName: data['groupName'] as String? ?? 'Group',
-      groupImage: data['groupImage'] as String? ?? '',
+      groupId: data['id'] as String? ?? data['groupId'] as String? ?? id,
+      groupName: data['group_name'] as String? ??
+          data['groupName'] as String? ??
+          'Group',
+      groupImage: data['group_image'] as String? ??
+          data['groupImage'] as String? ??
+          '',
       description: data['description'] as String? ?? '',
-      createdBy: data['createdBy'] as String? ?? '',
-      creatorName: data['creatorName'] as String? ?? '',
-      memberIds: List<String>.from(data['memberIds'] as List? ?? []),
+      createdBy: data['created_by'] as String? ??
+          data['createdBy'] as String? ??
+          '',
+      creatorName: data['creator_name'] as String? ??
+          data['creatorName'] as String? ??
+          '',
+      memberIds: parseMemberIds(data),
       memberDetails: members,
-      totalExpense: (data['totalExpense'] as num?)?.toDouble() ?? 0,
-      createdAt: timestampToDate(data['createdAt']),
-      updatedAt: timestampToDate(data['updatedAt']),
-      lastExpenseAt: timestampToDate(data['lastExpenseAt']),
-      groupType: data['groupType'] as String? ?? 'room',
+      totalExpense: (data['total_expense'] as num? ??
+              data['totalExpense'] as num?)
+          ?.toDouble() ??
+          0,
+      createdAt: timestampToDate(data['created_at'] ?? data['createdAt']),
+      updatedAt: timestampToDate(data['updated_at'] ?? data['updatedAt']),
+      lastExpenseAt:
+          timestampToDate(data['last_expense_at'] ?? data['lastExpenseAt']),
+      groupType: data['group_type'] as String? ??
+          data['groupType'] as String? ??
+          'room',
     );
   }
 

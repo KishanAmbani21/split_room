@@ -46,6 +46,8 @@ class CreateGroupInput {
         ),
       ];
 
+  String get currencyCode => AppColors.currencyCode;
+
   String get normalizedName => groupName.trim().toLowerCase();
 
   String get activityLogMessage =>

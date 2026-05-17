@@ -1,18 +1,25 @@
 import 'dart:async';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../core/services/supabase_realtime_service.dart';
+import '../../../core/utils/json_helpers.dart';
 import '../../dashboard/models/activity_log_item.dart';
 import '../../dashboard/models/monthly_spending.dart';
 import '../models/group_details_data.dart';
 import '../models/group_expense.dart';
+import '../models/group_json_helpers.dart';
 import '../models/group_member_balance.dart';
 
 class GroupDetailsService {
-  const GroupDetailsService({required FirebaseFirestore firestore})
-      : _firestore = firestore;
+  GroupDetailsService({
+    SupabaseClient? client,
+    SupabaseRealtimeService? realtime,
+  })  : _client = client ?? Supabase.instance.client,
+        _realtime = realtime ?? SupabaseRealtimeService();
 
-  final FirebaseFirestore _firestore;
+  final SupabaseClient _client;
+  final SupabaseRealtimeService _realtime;
 
   Stream<GroupDetailsData> watchGroupDetails({
     required String groupId,
@@ -20,19 +27,18 @@ class GroupDetailsService {
   }) {
     final controller = StreamController<GroupDetailsData>.broadcast();
 
-    DocumentSnapshot<Map<String, dynamic>>? groupDoc;
-    QuerySnapshot<Map<String, dynamic>>? expenseSnap;
-    QuerySnapshot<Map<String, dynamic>>? logsSnap;
+    Map<String, dynamic>? groupData;
+    List<Map<String, dynamic>>? expenseRows;
+    List<Map<String, dynamic>>? logRows;
 
     void emit() {
-      if (groupDoc == null || !groupDoc!.exists) return;
-      if (expenseSnap == null || logsSnap == null) return;
+      if (groupData == null || expenseRows == null || logRows == null) return;
       try {
         controller.add(
           _buildData(
-            groupDoc: groupDoc!,
-            expenseSnap: expenseSnap!,
-            logsSnap: logsSnap!,
+            groupData: groupData!,
+            expenseRows: expenseRows!,
+            logRows: logRows!,
             currentUserId: currentUserId,
           ),
         );
@@ -41,42 +47,25 @@ class GroupDetailsService {
       }
     }
 
-    final groupSub = _firestore.collection('groups').doc(groupId).snapshots().listen(
-      (snap) {
-        groupDoc = snap;
+    final subs = <StreamSubscription<dynamic>>[
+      _realtime.watchGroup(groupId).listen((g) {
+        if (g != null) groupData = g;
         emit();
-      },
-      onError: controller.addError,
-    );
-
-    final expenseSub = _firestore
-        .collection('expenses')
-        .where('groupId', isEqualTo: groupId)
-        .snapshots()
-        .listen(
-      (snap) {
-        expenseSnap = snap;
+      }, onError: controller.addError),
+      _realtime.watchGroupExpenses(groupId).listen((rows) {
+        expenseRows = rows;
         emit();
-      },
-      onError: controller.addError,
-    );
-
-    final logsSub = _firestore
-        .collection('group_logs')
-        .where('groupId', isEqualTo: groupId)
-        .snapshots()
-        .listen(
-      (snap) {
-        logsSnap = snap;
+      }, onError: controller.addError),
+      _realtime.watchGroupLogs(groupId).listen((rows) {
+        logRows = rows;
         emit();
-      },
-      onError: controller.addError,
-    );
+      }, onError: controller.addError),
+    ];
 
     controller.onCancel = () async {
-      await groupSub.cancel();
-      await expenseSub.cancel();
-      await logsSub.cancel();
+      for (final s in subs) {
+        await s.cancel();
+      }
     };
 
     return controller.stream;
@@ -86,49 +75,38 @@ class GroupDetailsService {
     required String groupId,
     required String currentUserId,
   }) async {
-    final groupRef = _firestore.collection('groups').doc(groupId);
-    final groupSnap = await groupRef.get();
-    if (!groupSnap.exists) {
+    final row = await _client
+        .from('groups')
+        .select('created_by')
+        .eq('id', groupId)
+        .maybeSingle();
+    if (row == null) {
       throw const GroupDetailsException('Group not found.');
     }
 
-    final createdBy = groupSnap.data()?['createdBy'] as String? ?? '';
+    final createdBy = row['created_by'] as String? ?? '';
     if (createdBy != currentUserId) {
-      throw const GroupDetailsException('Only the group creator can delete this group.');
+      throw const GroupDetailsException(
+        'Only the group creator can delete this group.',
+      );
     }
 
-    final expensesSnap = await _firestore
-        .collection('expenses')
-        .where('groupId', isEqualTo: groupId)
-        .get();
-
-    final logsSnap = await _firestore
-        .collection('group_logs')
-        .where('groupId', isEqualTo: groupId)
-        .get();
-
-    final batch = _firestore.batch();
-    for (final doc in expensesSnap.docs) {
-      batch.delete(doc.reference);
-    }
-    for (final doc in logsSnap.docs) {
-      batch.delete(doc.reference);
-    }
-    batch.delete(groupRef);
-    await batch.commit();
+    await _client.from('expenses').delete().eq('group_id', groupId);
+    await _client.from('group_logs').delete().eq('group_id', groupId);
+    await _client.from('group_members').delete().eq('group_id', groupId);
+    await _client.from('groups').delete().eq('id', groupId);
   }
 
   GroupDetailsData _buildData({
-    required DocumentSnapshot<Map<String, dynamic>> groupDoc,
-    required QuerySnapshot<Map<String, dynamic>> expenseSnap,
-    required QuerySnapshot<Map<String, dynamic>> logsSnap,
+    required Map<String, dynamic> groupData,
+    required List<Map<String, dynamic>> expenseRows,
+    required List<Map<String, dynamic>> logRows,
     required String currentUserId,
   }) {
-    final groupData = groupDoc.data()!;
-    final membersRaw = groupData['memberDetails'] as List? ??
-        groupData['members'] as List? ??
+    final membersRaw = groupData['member_details'] as List? ??
+        groupData['memberDetails'] as List? ??
         [];
-    final memberIds = List<String>.from(groupData['memberIds'] as List? ?? []);
+    final memberIds = parseMemberIds(groupData);
 
     final membersMeta = <String, _MemberMeta>{};
     for (final raw in membersRaw) {
@@ -143,7 +121,7 @@ class GroupDetailsService {
       );
     }
 
-    final expenses = expenseSnap.docs.map(_parseExpense).toList()
+    final expenses = expenseRows.map(_parseExpense).toList()
       ..sort((a, b) {
         final at = a.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
         final bt = b.createdAt ?? DateTime.fromMillisecondsSinceEpoch(0);
@@ -156,18 +134,27 @@ class GroupDetailsService {
     final (youOwe, youGetBack) = _yourBalances(currentUserId, expenses);
     final expenseByMember = _expenseByMemberShare(expenses);
     final monthlySpending = _monthlySpending(expenses);
-    final activities = _parseActivities(logsSnap, groupData['groupName'] as String? ?? 'Group');
+    final groupName = groupData['group_name'] as String? ??
+        groupData['groupName'] as String? ??
+        'Group';
+    final activities = _parseActivities(logRows, groupName);
 
     final pendingCount =
         memberBalances.where((m) => !m.isSettled).length;
 
     return GroupDetailsData(
-      groupId: groupData['groupId'] as String? ?? groupDoc.id,
-      groupName: groupData['groupName'] as String? ?? 'Group',
-      groupImage: groupData['groupImage'] as String? ?? '',
-      groupType: groupData['groupType'] as String? ?? 'room',
+      groupId: groupData['id'] as String? ?? groupData['groupId'] as String? ?? '',
+      groupName: groupName,
+      groupImage: groupData['group_image'] as String? ??
+          groupData['groupImage'] as String? ??
+          '',
+      groupType: groupData['group_type'] as String? ??
+          groupData['groupType'] as String? ??
+          'room',
       description: groupData['description'] as String? ?? '',
-      createdBy: groupData['createdBy'] as String? ?? '',
+      createdBy: groupData['created_by'] as String? ??
+          groupData['createdBy'] as String? ??
+          '',
       memberIds: memberIds,
       memberCount: memberIds.length,
       totalSpent: totalSpent,
@@ -183,26 +170,25 @@ class GroupDetailsService {
     );
   }
 
-  GroupExpense _parseExpense(QueryDocumentSnapshot<Map<String, dynamic>> doc) {
-    final data = doc.data();
-    final splitsRaw = data['splits'] as List? ?? [];
+  GroupExpense _parseExpense(Map<String, dynamic> data) {
+    final splitsRaw = data['expense_splits'] as List? ?? data['splits'] as List? ?? [];
     final splits = splitsRaw.map((s) {
       final map = Map<String, dynamic>.from(s as Map);
       return ExpenseSplit(
-        userId: map['userId'] as String? ?? '',
-        userName: map['userName'] as String? ?? 'Member',
+        userId: map['user_id'] as String? ?? map['userId'] as String? ?? '',
+        userName: map['user_name'] as String? ?? map['userName'] as String? ?? 'Member',
         amount: (map['amount'] as num?)?.toDouble() ?? 0,
       );
     }).toList();
 
     return GroupExpense(
-      id: doc.id,
-      groupId: data['groupId'] as String? ?? '',
+      id: data['id'] as String? ?? data['expenseId'] as String? ?? '',
+      groupId: data['group_id'] as String? ?? data['groupId'] as String? ?? '',
       title: data['title'] as String? ?? 'Expense',
       amount: (data['amount'] as num?)?.toDouble() ?? 0,
-      paidBy: data['paidBy'] as String? ?? '',
-      paidByName: data['paidByName'] as String? ?? 'Someone',
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+      paidBy: data['paid_by'] as String? ?? data['paidBy'] as String? ?? '',
+      paidByName: data['paid_by_name'] as String? ?? data['paidByName'] as String? ?? 'Someone',
+      createdAt: parseDateTime(data['created_at'] ?? data['createdAt']),
       splits: splits,
     );
   }
@@ -313,13 +299,16 @@ class GroupDetailsService {
   }
 
   List<ActivityLogItem> _parseActivities(
-    QuerySnapshot<Map<String, dynamic>> logsSnap,
+    List<Map<String, dynamic>> logRows,
     String groupName,
   ) {
-    final logs = logsSnap.docs.map((doc) {
-      final data = doc.data();
-      final action = data['actionType'] as String? ?? '';
-      final creator = data['creatorName'] as String? ?? 'Someone';
+    final logs = logRows.map((data) {
+      final action = data['action_type'] as String? ??
+          data['actionType'] as String? ??
+          '';
+      final creator = data['created_by_name'] as String? ??
+          data['creatorName'] as String? ??
+          'Someone';
 
       ActivityType type;
       String title;
@@ -337,7 +326,7 @@ class GroupDetailsService {
           subtitle = '$creator added an expense';
           break;
         case 'MEMBER_JOINED':
-          type = ActivityType.groupCreated;
+          type = ActivityType.memberJoined;
           title = 'Member joined';
           subtitle = '$creator joined the group';
           break;
@@ -353,10 +342,10 @@ class GroupDetailsService {
       }
 
       return ActivityLogItem(
-        id: doc.id,
+        id: data['id'] as String? ?? '',
         title: title,
         subtitle: subtitle,
-        timestamp: (data['timestamp'] as Timestamp?)?.toDate(),
+        timestamp: parseDateTime(data['timestamp'] ?? data['created_at']),
         type: type,
         groupName: groupName,
       );
@@ -405,15 +394,8 @@ class GroupDetailsException implements Exception {
 
 String groupDetailsErrorMessage(Object error) {
   if (error is GroupDetailsException) return error.message;
-  if (error is FirebaseException) {
-    switch (error.code) {
-      case 'permission-denied':
-        return 'Permission denied. Check Firestore rules.';
-      case 'unavailable':
-        return 'Firestore is unavailable. Check your connection.';
-      default:
-        return error.message ?? 'Could not load group details.';
-    }
+  if (error is PostgrestException) {
+    return error.message;
   }
   return 'Something went wrong. Please try again.';
 }

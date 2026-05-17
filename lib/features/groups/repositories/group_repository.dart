@@ -1,127 +1,75 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../../shared/services/firestore_write_logger.dart';
-
+import '../../../core/services/supabase_realtime_service.dart';
 import '../models/create_group_input.dart';
 import '../models/group_model.dart';
 
-/// Firestore access for groups and group_members.
+/// Supabase access for groups and group_members.
 class GroupRepository {
-  GroupRepository({required FirebaseFirestore firestore})
-      : _firestore = firestore;
+  GroupRepository({
+    SupabaseClient? client,
+    SupabaseRealtimeService? realtime,
+  })  : _client = client ?? Supabase.instance.client,
+        _realtime = realtime ?? SupabaseRealtimeService();
 
-  final FirebaseFirestore _firestore;
+  final SupabaseClient _client;
+  final SupabaseRealtimeService _realtime;
 
-  CollectionReference<Map<String, dynamic>> get _groups =>
-      _firestore.collection('groups');
-
-  CollectionReference<Map<String, dynamic>> get _groupMembers =>
-      _firestore.collection('group_members');
-
-  CollectionReference<Map<String, dynamic>> get _groupLogs =>
-      _firestore.collection('group_logs');
-
-  /// Realtime: all groups where [userId] is in memberIds.
   Stream<List<GroupModel>> watchGroupsForUser(String userId) {
-    return _groups
-        .where('memberIds', arrayContains: userId)
-        .snapshots()
-        .map((snapshot) {
-      final groups = snapshot.docs
-          .map(GroupModel.fromFirestore)
-          .toList();
-      groups.sort((a, b) {
-        final at = a.lastActivityAt ??
-            a.createdAt ??
-            DateTime.fromMillisecondsSinceEpoch(0);
-        final bt = b.lastActivityAt ??
-            b.createdAt ??
-            DateTime.fromMillisecondsSinceEpoch(0);
-        return bt.compareTo(at);
-      });
-      return groups;
-    });
+    return _realtime.watchUserGroups(userId).map(
+          (rows) => rows.map((r) => GroupModel.fromMap(r['id'] as String, r)).toList(),
+        );
   }
 
   Future<bool> groupNameExists(
     String groupName, {
     String? excludeGroupId,
   }) async {
-    final trimmed = groupName.trim();
-    if (trimmed.isEmpty) return false;
-    final lower = trimmed.toLowerCase();
+    final lower = groupName.trim().toLowerCase();
+    if (lower.isEmpty) return false;
 
-    for (final snap in [
-      await _groups.where('groupNameLower', isEqualTo: lower).limit(2).get(),
-      await _groups.where('groupName', isEqualTo: trimmed).limit(2).get(),
-    ]) {
-      for (final doc in snap.docs) {
-        if (excludeGroupId != null && doc.id == excludeGroupId) continue;
-        return true;
-      }
+    var query = _client
+        .from('groups')
+        .select('id')
+        .eq('group_name_lower', lower)
+        .isFilter('deleted_at', null);
+
+    final rows = await query;
+    for (final row in rows as List) {
+      final id = row['id'] as String?;
+      if (excludeGroupId != null && id == excludeGroupId) continue;
+      return true;
     }
     return false;
   }
 
   Future<Map<String, dynamic>> fetchGroup(String groupId) async {
-    final snap = await _groups.doc(groupId).get();
-    if (!snap.exists) {
+    final row = await _client
+        .from('groups')
+        .select()
+        .eq('id', groupId)
+        .isFilter('deleted_at', null)
+        .maybeSingle();
+    if (row == null) {
       throw const GroupRepositoryException('Group not found.');
     }
-    return snap.data()!;
+    return Map<String, dynamic>.from(row);
   }
 
-  /// Atomic create: group doc + group_members rows + group_logs entry.
   Future<String> createGroup(CreateGroupInput input) async {
-    final groupRef = _groups.doc();
-    final groupId = groupRef.id;
-    final now = FieldValue.serverTimestamp();
-    final groupData = input.toGroupDocument(groupId);
-
-    final batch = _firestore.batch()
-      ..set(groupRef, {
-        ...groupData,
-        'createdAt': now,
-        'updatedAt': now,
-      });
-
-    for (final member in input.memberDetails) {
-      final memberRef = _groupMembers.doc('${groupId}_${member.uid}');
-      batch.set(memberRef, {
-        'groupMemberId': memberRef.id,
-        'groupId': groupId,
-        'userId': member.uid,
-        'userName': member.name,
-        'userEmail': member.email,
-        'joinedAt': now,
-        'addedBy': input.createdBy,
-      });
-    }
-
-    final logRef = _groupLogs.doc();
-    final snapshot = input.fullSnapshot(groupId);
-    batch.set(logRef, {
-      'logId': logRef.id,
-      'groupId': groupId,
-      'actionType': 'GROUP_CREATED',
-      'actionMessage': input.activityLogMessage,
-      'createdBy': input.createdBy,
-      'createdByName': input.creatorName,
-      'createdAt': now,
-      'timestamp': now,
-      'memberIds': input.memberIds,
-      'fullDataSnapshot': snapshot,
-      'groupData': snapshot,
-    });
-
-    await batch.commit();
-    FirestoreWriteLogger.log(
-      'batch',
-      collection: 'groups',
-      documentId: groupId,
-      reason: 'create group',
+    final groupId = await _client.rpc(
+      'create_group_atomic',
+      params: {
+        'p_group_name': input.groupName.trim(),
+        'p_description': input.description.trim(),
+        'p_group_image': input.groupImagePath ?? '',
+        'p_group_type': input.groupType.name,
+        'p_creator_name': input.creatorName,
+        'p_currency': input.currencyCode,
+        'p_member_details': input.memberDetails.map((m) => m.toMap()).toList(),
+      },
     );
-    return groupId;
+    return groupId.toString();
   }
 
   Future<void> addGroupMemberRecords({
@@ -129,28 +77,18 @@ class GroupRepository {
     required String addedBy,
     required List<Map<String, dynamic>> newMembers,
   }) async {
-    final batch = _firestore.batch();
-    final now = FieldValue.serverTimestamp();
     for (final member in newMembers) {
       final uid = member['uid'] as String? ?? '';
       if (uid.isEmpty) continue;
-      final ref = _groupMembers.doc('${groupId}_$uid');
-      batch.set(ref, {
-        'groupMemberId': ref.id,
-        'groupId': groupId,
-        'userId': uid,
-        'userName': member['name'] as String? ?? 'Member',
-        'userEmail': member['email'] as String? ?? '',
-        'joinedAt': now,
-        'addedBy': addedBy,
-      }, SetOptions(merge: true));
+      await _client.from('group_members').upsert({
+        'group_id': groupId,
+        'user_id': uid,
+        'user_name': member['name'] as String? ?? 'Member',
+        'user_email': member['email'] as String? ?? '',
+        'added_by': addedBy,
+        'is_creator': member['isCreator'] as bool? ?? false,
+      });
     }
-    await batch.commit();
-    FirestoreWriteLogger.log(
-      'batch',
-      collection: 'group_members',
-      reason: 'add ${newMembers.length} members',
-    );
   }
 }
 

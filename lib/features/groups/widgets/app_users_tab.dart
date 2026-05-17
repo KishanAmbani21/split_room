@@ -43,7 +43,7 @@ class AppUsersTab extends ConsumerWidget {
           error: (error, _) => _UsersEmptyState(
             icon: Icons.cloud_off_rounded,
             title: 'Could not load users',
-            subtitle: 'Check your connection and Firestore rules.',
+            subtitle: 'Check your connection and Supabase policies.',
           ),
           data: (users) {
             final query = state.memberSearchQuery.trim().toLowerCase();

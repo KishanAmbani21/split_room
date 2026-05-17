@@ -4,5 +4,5 @@ import '../../../shared/providers/app_providers.dart';
 import '../services/activity_undo_service.dart';
 
 final activityUndoServiceProvider = Provider<ActivityUndoService>(
-  (ref) => ActivityUndoService(firestore: ref.watch(firestoreProvider)),
+  (ref) => ActivityUndoService(client: ref.watch(supabaseClientProvider)),
 );

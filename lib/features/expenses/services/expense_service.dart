@@ -1,18 +1,18 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../../shared/services/firestore_write_logger.dart';
+import '../../groups/models/group_json_helpers.dart';
 import '../../notifications/services/notification_service.dart';
 import '../models/add_expense_input.dart';
 import '../models/expense_group_member.dart';
 
 class ExpenseService {
   ExpenseService({
-    required FirebaseFirestore firestore,
+    SupabaseClient? client,
     NotificationService? notificationService,
-  })  : _firestore = firestore,
+  })  : _client = client ?? Supabase.instance.client,
         _notifications = notificationService;
 
-  final FirebaseFirestore _firestore;
+  final SupabaseClient _client;
   final NotificationService? _notifications;
 
   static const actionExpenseAdded = 'EXPENSE_ADDED';
@@ -20,43 +20,23 @@ class ExpenseService {
   static const actionExpenseDeleted = 'EXPENSE_DELETED';
 
   Future<String> createExpense(AddExpenseInput input) async {
-    final expenseRef = _firestore.collection('expenses').doc();
-    final expenseId = expenseRef.id;
-    final logRef = _firestore.collection('group_logs').doc();
-    final groupRef = _firestore.collection('groups').doc(input.groupId);
-
-    final expenseData = input.toExpenseMap(expenseId)
-      ..['category'] = inferExpenseCategory(input.title)
-      ..['createdAt'] = FieldValue.serverTimestamp();
-
-    if (input.expenseDate != null) {
-      expenseData['expenseDate'] = Timestamp.fromDate(input.expenseDate!);
-    }
-
-    final batch = _firestore.batch()
-      ..set(expenseRef, expenseData)
-      ..set(logRef, {
-        'logId': logRef.id,
-        'groupId': input.groupId,
-        'actionType': actionExpenseAdded,
-        'createdBy': input.createdBy,
-        'creatorName': input.createdByName,
-        'memberIds': input.memberIds,
-        'timestamp': FieldValue.serverTimestamp(),
-        'expenseData': input.toLogExpenseSnapshot(expenseId),
-      })
-      ..update(groupRef, {
-        'totalExpense': FieldValue.increment(input.amount),
-        'lastExpenseAt': FieldValue.serverTimestamp(),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-
-    await batch.commit();
-    FirestoreWriteLogger.log(
-      'batch',
-      collection: 'expenses',
-      documentId: expenseId,
-      reason: 'create expense',
+    final expenseId = await _client.rpc(
+      'create_expense_atomic',
+      params: {
+        'p_group_id': input.groupId,
+        'p_group_name': input.groupName,
+        'p_title': input.title.trim(),
+        'p_amount': input.amount,
+        'p_paid_by': input.paidBy,
+        'p_paid_by_name': input.paidByName,
+        'p_category': inferExpenseCategory(input.title),
+        'p_split_type': input.splitType.name,
+        'p_notes': input.notes.trim(),
+        'p_receipt_image': input.receiptImage,
+        'p_expense_date': input.expenseDate?.toIso8601String(),
+        'p_member_ids': input.memberIds,
+        'p_splits': input.splits.map((s) => s.toMap()).toList(),
+      },
     );
 
     await _notify(
@@ -70,7 +50,7 @@ class ExpenseService {
       createdBy: input.createdBy,
     );
 
-    return expenseId;
+    return expenseId.toString();
   }
 
   Future<void> updateExpense({
@@ -79,50 +59,58 @@ class ExpenseService {
     required double previousAmount,
     required String updatedByName,
   }) async {
-    final expenseRef = _firestore.collection('expenses').doc(expenseId);
-    final logRef = _firestore.collection('group_logs').doc();
-    final groupRef = _firestore.collection('groups').doc(input.groupId);
     final amountDelta = input.amount - previousAmount;
 
-    final expenseData = input.toExpenseMap(expenseId)
-      ..['category'] = inferExpenseCategory(input.title)
-      ..['updatedAt'] = FieldValue.serverTimestamp();
+    await _client.from('expenses').update({
+      'group_name': input.groupName,
+      'title': input.title.trim(),
+      'amount': input.amount,
+      'paid_by': input.paidBy,
+      'paid_by_name': input.paidByName,
+      'category': inferExpenseCategory(input.title),
+      'split_type': input.splitType.name,
+      'notes': input.notes.trim(),
+      'receipt_image': input.receiptImage,
+      'expense_date': input.expenseDate?.toIso8601String(),
+      'member_ids': input.memberIds,
+    }).eq('id', expenseId);
 
-    if (input.expenseDate != null) {
-      expenseData['expenseDate'] = Timestamp.fromDate(input.expenseDate!);
-    }
-
-    final batch = _firestore.batch()
-      ..update(expenseRef, expenseData)
-      ..set(logRef, {
-        'logId': logRef.id,
-        'groupId': input.groupId,
-        'actionType': actionExpenseUpdated,
-        'createdBy': input.createdBy,
-        'creatorName': updatedByName,
-        'memberIds': input.memberIds,
-        'timestamp': FieldValue.serverTimestamp(),
-        'expenseData': input.toLogExpenseSnapshot(expenseId),
-      });
+    await _client.from('expense_splits').delete().eq('expense_id', expenseId);
+    await _client.from('expense_splits').insert(
+      input.splits
+          .map(
+            (s) => {
+              'expense_id': expenseId,
+              'user_id': s.userId,
+              'user_name': s.userName,
+              'amount': s.amount,
+            },
+          )
+          .toList(),
+    );
 
     if (amountDelta.abs() > 0.001) {
-      batch.update(groupRef, {
-        'totalExpense': FieldValue.increment(amountDelta),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
-    } else {
-      batch.update(groupRef, {
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+      final group = await _client
+          .from('groups')
+          .select('total_expense')
+          .eq('id', input.groupId)
+          .single();
+      final current =
+          (group['total_expense'] as num?)?.toDouble() ?? 0;
+      await _client.from('groups').update({
+        'total_expense': current + amountDelta,
+        'updated_at': DateTime.now().toIso8601String(),
+      }).eq('id', input.groupId);
     }
 
-    await batch.commit();
-    FirestoreWriteLogger.log(
-      'batch',
-      collection: 'expenses',
-      documentId: input.expenseId,
-      reason: 'update expense',
-    );
+    await _client.from('group_logs').insert({
+      'group_id': input.groupId,
+      'action_type': actionExpenseUpdated,
+      'created_by': input.createdBy,
+      'created_by_name': updatedByName,
+      'member_ids': input.memberIds,
+      'expense_data': input.toLogExpenseSnapshot(expenseId),
+    });
 
     await _notify(
       memberIds: input.memberIds,
@@ -141,47 +129,56 @@ class ExpenseService {
     required String deletedBy,
     required String deletedByName,
   }) async {
-    final expenseRef = _firestore.collection('expenses').doc(expenseId);
-    final snap = await expenseRef.get();
-    if (!snap.exists) {
+    final expense = await _client
+        .from('expenses')
+        .select()
+        .eq('id', expenseId)
+        .maybeSingle();
+    if (expense == null) {
       throw const ExpenseServiceException('Expense not found.');
     }
 
-    final expense = Map<String, dynamic>.from(snap.data()!);
     final amount = (expense['amount'] as num?)?.toDouble() ?? 0;
-    final groupId = expense['groupId'] as String? ?? '';
-    final groupName = expense['groupName'] as String? ?? 'Group';
-    final memberIds = List<String>.from(expense['memberIds'] as List? ?? []);
+    final groupId = expense['group_id'] as String? ?? '';
+    final groupName = expense['group_name'] as String? ?? 'Group';
+    final memberIds =
+        List<String>.from((expense['member_ids'] as List?) ?? []);
     final title = expense['title'] as String? ?? 'Expense';
 
-    final logRef = _firestore.collection('group_logs').doc();
-    final batch = _firestore.batch()
-      ..delete(expenseRef)
-      ..set(logRef, {
-        'logId': logRef.id,
-        'groupId': groupId,
-        'actionType': actionExpenseDeleted,
-        'createdBy': deletedBy,
-        'creatorName': deletedByName,
-        'memberIds': memberIds,
-        'timestamp': FieldValue.serverTimestamp(),
-        'deletedSnapshot': expense,
-      })
-      ..update(_firestore.collection('groups').doc(groupId), {
-        'totalExpense': FieldValue.increment(-amount),
-        'updatedAt': FieldValue.serverTimestamp(),
-      });
+    final splits = await _client
+        .from('expense_splits')
+        .select()
+        .eq('expense_id', expenseId);
+    final snapshot = {
+      ...expense,
+      'splits': splits,
+      'expenseId': expenseId,
+      'groupId': groupId,
+    };
 
-    await batch.commit();
-    FirestoreWriteLogger.log(
-      'batch',
-      collection: 'expenses',
-      documentId: expenseId,
-      reason: 'delete expense',
-    );
+    await _client.from('expenses').delete().eq('id', expenseId);
 
-    final groupSnap = await _firestore.collection('groups').doc(groupId).get();
-    final groupImage = groupSnap.data()?['groupImage'] as String? ?? '';
+    final group = await _client
+        .from('groups')
+        .select('total_expense, group_image')
+        .eq('id', groupId)
+        .maybeSingle();
+    final current = (group?['total_expense'] as num?)?.toDouble() ?? 0;
+    final groupImage = group?['group_image'] as String? ?? '';
+
+    await _client.from('groups').update({
+      'total_expense': current - amount,
+      'updated_at': DateTime.now().toIso8601String(),
+    }).eq('id', groupId);
+
+    await _client.from('group_logs').insert({
+      'group_id': groupId,
+      'action_type': actionExpenseDeleted,
+      'created_by': deletedBy,
+      'created_by_name': deletedByName,
+      'member_ids': memberIds,
+      'deleted_snapshot': snapshot,
+    });
 
     await _notify(
       memberIds: memberIds,
@@ -197,37 +194,77 @@ class ExpenseService {
   }
 
   Future<Map<String, dynamic>> fetchExpense(String expenseId) async {
-    final snap = await _firestore.collection('expenses').doc(expenseId).get();
-    if (!snap.exists) {
+    final row = await _client
+        .from('expenses')
+        .select('*, expense_splits(*)')
+        .eq('id', expenseId)
+        .maybeSingle();
+    if (row == null) {
       throw const ExpenseServiceException('Expense not found.');
     }
-    return snap.data()!;
+    return _expenseRowToLegacyMap(row);
   }
 
   Future<ExpenseGroupContext> loadGroupContext(String groupId) async {
-    final snap = await _firestore.collection('groups').doc(groupId).get();
-    if (!snap.exists) {
+    final row = await _client
+        .from('groups')
+        .select()
+        .eq('id', groupId)
+        .isFilter('deleted_at', null)
+        .maybeSingle();
+    if (row == null) {
       throw const ExpenseServiceException('Group not found.');
     }
 
-    final data = snap.data()!;
-    final membersRaw =
-        data['memberDetails'] as List? ?? data['members'] as List? ?? [];
-    final memberIds = List<String>.from(data['memberIds'] as List? ?? []);
-
-    final members = membersRaw
-        .map(
-          (m) => ExpenseGroupMember.fromMap(Map<String, dynamic>.from(m as Map)),
-        )
-        .where((m) => m.uid.isNotEmpty)
-        .toList();
+    final map = Map<String, dynamic>.from(row);
+    final members = parseMemberDetails(map);
+    final memberIds = parseMemberIds(map);
 
     return ExpenseGroupContext(
-      groupId: data['groupId'] as String? ?? groupId,
-      groupName: data['groupName'] as String? ?? 'Group',
+      groupId: row['id'] as String? ?? groupId,
+      groupName: row['group_name'] as String? ?? 'Group',
       memberIds: memberIds,
-      members: members,
+      members: members
+          .map(
+            (m) => ExpenseGroupMember(
+              uid: m.uid,
+              name: m.name,
+              profileImage: m.profileImage.isEmpty ? null : m.profileImage,
+              isCreator: m.isCreator,
+            ),
+          )
+          .toList(),
     );
+  }
+
+  Map<String, dynamic> _expenseRowToLegacyMap(Map<String, dynamic> row) {
+    final splitsRaw = row['expense_splits'] as List? ?? [];
+    final splits = splitsRaw.map((s) {
+      final m = Map<String, dynamic>.from(s as Map);
+      return {
+        'userId': m['user_id'] ?? m['userId'],
+        'userName': m['user_name'] ?? m['userName'],
+        'amount': m['amount'],
+      };
+    }).toList();
+
+    return {
+      'expenseId': row['id'],
+      'groupId': row['group_id'] ?? row['groupId'],
+      'groupName': row['group_name'] ?? row['groupName'],
+      'title': row['title'],
+      'amount': row['amount'],
+      'paidBy': row['paid_by'] ?? row['paidBy'],
+      'paidByName': row['paid_by_name'] ?? row['paidByName'],
+      'splitType': row['split_type'] ?? row['splitType'],
+      'notes': row['notes'],
+      'receiptImage': row['receipt_image'] ?? row['receiptImage'],
+      'createdBy': row['created_by'] ?? row['createdBy'],
+      'memberIds': row['member_ids'] ?? row['memberIds'],
+      'splits': splits,
+      'createdAt': row['created_at'] ?? row['createdAt'],
+      'expenseDate': row['expense_date'] ?? row['expenseDate'],
+    };
   }
 
   Future<void> _notify({
@@ -301,15 +338,11 @@ class ExpenseServiceException implements Exception {
 
 String expenseServiceErrorMessage(Object error) {
   if (error is ExpenseServiceException) return error.message;
-  if (error is FirebaseException) {
-    switch (error.code) {
-      case 'permission-denied':
-        return 'Permission denied. Check Firestore rules.';
-      case 'unavailable':
-        return 'Firestore is unavailable. Check your connection.';
-      default:
-        return error.message ?? 'Could not save expense.';
+  if (error is PostgrestException) {
+    if (error.code == '42501') {
+      return 'Permission denied. Check Supabase RLS policies.';
     }
+    return error.message;
   }
   return 'Could not save expense. Please try again.';
 }
