@@ -31,10 +31,9 @@ class _AddMembersScreenState extends ConsumerState<AddMembersScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(addMembersProvider.notifier).initialize(
-            widget.groupId,
-            widget.user.uid,
-          );
+      ref
+          .read(addMembersProvider.notifier)
+          .initialize(widget.groupId, widget.user.uid);
     });
   }
 
@@ -87,9 +86,7 @@ class _AddMembersScreenState extends ConsumerState<AddMembersScreen> {
                           children: [
                             Text(
                               'Selected (${state.selectedIds.length})',
-                              style: Theme.of(context)
-                                  .textTheme
-                                  .labelLarge
+                              style: Theme.of(context).textTheme.labelLarge
                                   ?.copyWith(fontWeight: FontWeight.w700),
                             ),
                             const SizedBox(height: 8),
@@ -125,14 +122,13 @@ class _AddMembersScreenState extends ConsumerState<AddMembersScreen> {
                         : ListView.separated(
                             padding: AppLayout.pagePadding(context),
                             itemCount: state.filteredUsers.length,
-                            separatorBuilder: (_, __) =>
+                            separatorBuilder: (_, _) =>
                                 const SizedBox(height: 10),
                             itemBuilder: (context, i) {
                               final user = state.filteredUsers[i];
                               return MemberUserCard(
                                 user: user,
-                                selected:
-                                    state.selectedIds.contains(user.uid),
+                                selected: state.selectedIds.contains(user.uid),
                                 onTap: () => notifier.toggle(user),
                               );
                             },
@@ -156,7 +152,9 @@ class _AddMembersScreenState extends ConsumerState<AddMembersScreen> {
 
   Future<void> _submit() async {
     try {
-      await ref.read(addMembersProvider.notifier).submit(
+      await ref
+          .read(addMembersProvider.notifier)
+          .submit(
             widget.user.uid,
             widget.user.fullName.isEmpty ? 'You' : widget.user.fullName,
           );

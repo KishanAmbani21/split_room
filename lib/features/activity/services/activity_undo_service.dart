@@ -5,7 +5,7 @@ import '../../dashboard/models/activity_log_item.dart';
 /// Restores items from [EXPENSE_DELETED] / [GROUP_DELETED] / [MEMBER_REMOVED] logs.
 class ActivityUndoService {
   ActivityUndoService({SupabaseClient? client})
-      : _client = client ?? Supabase.instance.client;
+    : _client = client ?? Supabase.instance.client;
 
   final SupabaseClient _client;
 
@@ -16,13 +16,21 @@ class ActivityUndoService {
   }) async {
     switch (item.type) {
       case ActivityType.expenseDeleted:
-        await _client.rpc('restore_expense_from_log', params: {'p_log_id': item.id});
+        await _client.rpc(
+          'restore_expense_from_log',
+          params: {'p_log_id': item.id},
+        );
       case ActivityType.groupDeleted:
-        await _client.rpc('restore_group_from_log', params: {'p_log_id': item.id});
+        await _client.rpc(
+          'restore_group_from_log',
+          params: {'p_log_id': item.id},
+        );
       case ActivityType.memberRemoved:
         await _restoreMember(item, userId, userName);
       default:
-        throw const ActivityUndoException('Only deleted items can be restored.');
+        throw const ActivityUndoException(
+          'Only deleted items can be restored.',
+        );
     }
   }
 
@@ -80,10 +88,10 @@ class ActivityUndoService {
       details.add(member);
     }
 
-    await _client.from('groups').update({
-      'member_ids': memberIds,
-      'member_details': details,
-    }).eq('id', groupId);
+    await _client
+        .from('groups')
+        .update({'member_ids': memberIds, 'member_details': details})
+        .eq('id', groupId);
 
     await _client.from('group_members').upsert({
       'group_id': groupId,
@@ -91,9 +99,13 @@ class ActivityUndoService {
       'user_name': member['name'] ?? 'Member',
       'user_email': member['email'] ?? '',
       'added_by': userId,
-    });
+      'deleted_at': null,
+    }, onConflict: 'group_id,user_id');
 
-    await _client.from('group_logs').update({'restored': true}).eq('id', item.id);
+    await _client
+        .from('group_logs')
+        .update({'restored': true})
+        .eq('id', item.id);
 
     await _client.from('group_logs').insert({
       'group_id': groupId,

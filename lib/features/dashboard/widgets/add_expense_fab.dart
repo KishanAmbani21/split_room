@@ -54,7 +54,9 @@ class AddExpenseFab extends ConsumerWidget {
     }
 
     try {
-      final ctx = await ref.read(expenseServiceProvider).loadGroupContext(group.groupId);
+      final ctx = await ref
+          .read(expenseServiceProvider)
+          .loadGroupContext(group.groupId);
       if (!context.mounted) return;
       await openAddExpenseScreen(
         context,
@@ -111,13 +113,14 @@ class _GroupPickerSheet extends StatelessWidget {
               child: ListView.separated(
                 shrinkWrap: true,
                 itemCount: groups.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
+                separatorBuilder: (_, _) => const Divider(height: 1),
                 itemBuilder: (context, index) {
                   final g = groups[index];
                   return ListTile(
                     leading: CircleAvatar(
-                      backgroundColor:
-                          AppColors.primary.withValues(alpha: 0.12),
+                      backgroundColor: AppColors.primary.withValues(
+                        alpha: 0.12,
+                      ),
                       child: Text(
                         g.groupName.isNotEmpty
                             ? g.groupName[0].toUpperCase()

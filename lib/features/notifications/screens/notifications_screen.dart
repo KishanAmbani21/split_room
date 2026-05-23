@@ -10,8 +10,10 @@ import '../providers/notification_providers.dart';
 
 final userNotificationsProvider = StreamProvider.autoDispose
     .family<List<AppNotification>, String>((ref, userId) {
-  return ref.watch(notificationServiceProvider).watchNotificationList(userId);
-});
+      return ref
+          .watch(notificationServiceProvider)
+          .watchNotificationList(userId);
+    });
 
 class NotificationsScreen extends ConsumerWidget {
   const NotificationsScreen({required this.user, super.key});
@@ -28,9 +30,8 @@ class NotificationsScreen extends ConsumerWidget {
           title: const Text('Notifications'),
           actions: [
             TextButton(
-              onPressed: () => ref
-                  .read(notificationServiceProvider)
-                  .markAllRead(user.uid),
+              onPressed: () =>
+                  ref.read(notificationServiceProvider).markAllRead(user.uid),
               child: const Text('Mark all read'),
             ),
           ],
@@ -62,9 +63,7 @@ class NotificationsScreen extends ConsumerWidget {
           ),
           data: (items) {
             if (items.isEmpty) {
-              return const Center(
-                child: Text('No notifications yet'),
-              );
+              return const Center(child: Text('No notifications yet'));
             }
 
             return RefreshIndicator(
@@ -77,16 +76,14 @@ class NotificationsScreen extends ConsumerWidget {
                 physics: const AlwaysScrollableScrollPhysics(),
                 padding: AppLayout.scrollPadding(context),
                 itemCount: items.length,
-                separatorBuilder: (_, __) => const SizedBox(height: 10),
+                separatorBuilder: (_, _) => const SizedBox(height: 10),
                 itemBuilder: (context, index) {
                   final n = items[index];
                   return _NotificationTile(
                     notification: n,
                     onTap: () {
                       if (!n.isRead) {
-                        ref
-                            .read(notificationServiceProvider)
-                            .markRead(n.id);
+                        ref.read(notificationServiceProvider).markRead(n.id);
                       }
                     },
                   );
@@ -101,10 +98,7 @@ class NotificationsScreen extends ConsumerWidget {
 }
 
 class _NotificationTile extends StatelessWidget {
-  const _NotificationTile({
-    required this.notification,
-    required this.onTap,
-  });
+  const _NotificationTile({required this.notification, required this.onTap});
 
   final AppNotification notification;
   final VoidCallback onTap;
@@ -116,6 +110,7 @@ class _NotificationTile extends StatelessWidget {
       case 'EXPENSE_UPDATED':
         return Icons.edit_outlined;
       case 'EXPENSE_DELETED':
+      case 'GROUP_DELETED':
         return Icons.delete_outline_rounded;
       case 'GROUP_CREATED':
         return Icons.group_add_rounded;
@@ -129,6 +124,7 @@ class _NotificationTile extends StatelessWidget {
   Color _accent(Brightness brightness) {
     switch (notification.type) {
       case 'EXPENSE_DELETED':
+      case 'GROUP_DELETED':
         return AppColors.errorColor(brightness);
       case 'EXPENSE_ADDED':
       case 'GROUP_CREATED':
@@ -191,18 +187,12 @@ class _NotificationTile extends StatelessWidget {
                     const SizedBox(height: 4),
                     Text(
                       notification.message,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        height: 1.35,
-                      ),
+                      style: theme.textTheme.bodyMedium?.copyWith(height: 1.35),
                     ),
                     const SizedBox(height: 6),
                     Row(
                       children: [
-                        Icon(
-                          Icons.groups_rounded,
-                          size: 14,
-                          color: muted,
-                        ),
+                        Icon(Icons.groups_rounded, size: 14, color: muted),
                         const SizedBox(width: 4),
                         Expanded(
                           child: Text(
@@ -245,8 +235,18 @@ class _NotificationTile extends StatelessWidget {
 
   static String _format(DateTime time) {
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${time.day} ${months[time.month - 1]}, ${time.hour}:${time.minute.toString().padLeft(2, '0')}';
   }

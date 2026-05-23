@@ -6,6 +6,7 @@ import '../../../core/services/supabase_realtime_service.dart';
 import '../../../core/utils/json_helpers.dart';
 import '../../dashboard/models/activity_log_item.dart';
 import '../../dashboard/models/monthly_spending.dart';
+import '../../notifications/services/notification_service.dart';
 import '../models/group_details_data.dart';
 import '../models/group_expense.dart';
 import '../models/group_json_helpers.dart';
@@ -16,11 +17,14 @@ class GroupDetailsService {
   GroupDetailsService({
     SupabaseClient? client,
     SupabaseRealtimeService? realtime,
-  })  : _client = client ?? Supabase.instance.client,
-        _realtime = realtime ?? SupabaseRealtimeService();
+    NotificationService? notificationService,
+  }) : _client = client ?? Supabase.instance.client,
+       _realtime = realtime ?? SupabaseRealtimeService(),
+       _notifications = notificationService;
 
   final SupabaseClient _client;
   final SupabaseRealtimeService _realtime;
+  final NotificationService? _notifications;
 
   Stream<GroupDetailsData> watchGroupDetails({
     required String groupId,
@@ -96,44 +100,26 @@ class GroupDetailsService {
     }
 
     final memberIds = parseMemberIds(group);
-    final members = await _client
-        .from('group_members')
-        .select()
-        .eq('group_id', groupId);
+    final groupName = group['group_name'] as String? ?? 'Group';
+    final groupImage = group['group_image'] as String? ?? '';
 
-    final expenseRows = await _client
-        .from('expenses')
-        .select('*, expense_splits(*)')
-        .eq('group_id', groupId);
+    await _client.rpc(
+      'soft_delete_group',
+      params: {'p_group_id': groupId, 'p_deleted_by_name': deletedByName},
+    );
 
-    final expensesWithSplits = <Map<String, dynamic>>[];
-    for (final exp in expenseRows as List) {
-      final map = Map<String, dynamic>.from(exp as Map);
-      final splitsRaw = map['expense_splits'] as List? ?? [];
-      map['splits'] = splitsRaw;
-      map.remove('expense_splits');
-      expensesWithSplits.add(map);
-    }
-
-    final snapshot = {
-      'group': group,
-      'groupId': groupId,
-      'group_members': members,
-      'expenses': expensesWithSplits,
-    };
-
-    await _client.from('group_logs').insert({
-      'group_id': groupId,
-      'action_type': 'GROUP_DELETED',
-      'created_by': currentUserId,
-      'created_by_name': deletedByName,
-      'member_ids': memberIds,
-      'deleted_snapshot': snapshot,
-    });
-
-    await _client.from('expenses').delete().eq('group_id', groupId);
-    await _client.from('group_members').delete().eq('group_id', groupId);
-    await _client.from('groups').delete().eq('id', groupId);
+    await _notifications?.notifyGroupMembers(
+      memberIds: memberIds,
+      excludeUserId: currentUserId,
+      groupId: groupId,
+      groupName: groupName,
+      groupImage: groupImage,
+      type: 'GROUP_DELETED',
+      title: 'Group Deleted',
+      message: '$deletedByName deleted "$groupName"',
+      createdBy: currentUserId,
+      createdByName: deletedByName,
+    );
   }
 
   GroupDetailsData _buildData({
@@ -142,7 +128,8 @@ class GroupDetailsService {
     required List<Map<String, dynamic>> logRows,
     required String currentUserId,
   }) {
-    final membersRaw = groupData['member_details'] as List? ??
+    final membersRaw =
+        groupData['member_details'] as List? ??
         groupData['memberDetails'] as List? ??
         [];
     final memberIds = parseMemberIds(groupData);
@@ -178,25 +165,29 @@ class GroupDetailsService {
     );
     final expenseByMember = _expenseByMemberShare(expenses);
     final monthlySpending = _monthlySpending(expenses);
-    final groupName = groupData['group_name'] as String? ??
+    final groupName =
+        groupData['group_name'] as String? ??
         groupData['groupName'] as String? ??
         'Group';
     final activities = _parseActivities(logRows, groupName);
 
-    final pendingCount =
-        memberBalances.where((m) => !m.isSettled).length;
+    final pendingCount = memberBalances.where((m) => !m.isSettled).length;
 
     return GroupDetailsData(
-      groupId: groupData['id'] as String? ?? groupData['groupId'] as String? ?? '',
+      groupId:
+          groupData['id'] as String? ?? groupData['groupId'] as String? ?? '',
       groupName: groupName,
-      groupImage: groupData['group_image'] as String? ??
+      groupImage:
+          groupData['group_image'] as String? ??
           groupData['groupImage'] as String? ??
           '',
-      groupType: groupData['group_type'] as String? ??
+      groupType:
+          groupData['group_type'] as String? ??
           groupData['groupType'] as String? ??
           'room',
       description: groupData['description'] as String? ?? '',
-      createdBy: groupData['created_by'] as String? ??
+      createdBy:
+          groupData['created_by'] as String? ??
           groupData['createdBy'] as String? ??
           '',
       memberIds: memberIds,
@@ -217,12 +208,16 @@ class GroupDetailsService {
   }
 
   GroupExpense _parseExpense(Map<String, dynamic> data) {
-    final splitsRaw = data['expense_splits'] as List? ?? data['splits'] as List? ?? [];
+    final splitsRaw =
+        data['expense_splits'] as List? ?? data['splits'] as List? ?? [];
     final splits = splitsRaw.map((s) {
       final map = Map<String, dynamic>.from(s as Map);
       return ExpenseSplit(
         userId: map['user_id'] as String? ?? map['userId'] as String? ?? '',
-        userName: map['user_name'] as String? ?? map['userName'] as String? ?? 'Member',
+        userName:
+            map['user_name'] as String? ??
+            map['userName'] as String? ??
+            'Member',
         amount: (map['amount'] as num?)?.toDouble() ?? 0,
       );
     }).toList();
@@ -233,7 +228,10 @@ class GroupDetailsService {
       title: data['title'] as String? ?? 'Expense',
       amount: (data['amount'] as num?)?.toDouble() ?? 0,
       paidBy: data['paid_by'] as String? ?? data['paidBy'] as String? ?? '',
-      paidByName: data['paid_by_name'] as String? ?? data['paidByName'] as String? ?? 'Someone',
+      paidByName:
+          data['paid_by_name'] as String? ??
+          data['paidByName'] as String? ??
+          'Someone',
       createdAt: parseDateTime(data['created_at'] ?? data['createdAt']),
       splits: splits,
     );
@@ -354,8 +352,7 @@ class GroupDetailsService {
         profileImage: meta?.profileImage,
         isCreator: meta?.isCreator ?? false,
       );
-    }).toList()
-      ..sort((a, b) => b.balance.abs().compareTo(a.balance.abs()));
+    }).toList()..sort((a, b) => b.balance.abs().compareTo(a.balance.abs()));
   }
 
   Map<String, double> _expenseByMemberShare(List<GroupExpense> expenses) {
@@ -406,10 +403,10 @@ class GroupDetailsService {
     String groupName,
   ) {
     final logs = logRows.map((data) {
-      final action = data['action_type'] as String? ??
-          data['actionType'] as String? ??
-          '';
-      final creator = data['created_by_name'] as String? ??
+      final action =
+          data['action_type'] as String? ?? data['actionType'] as String? ?? '';
+      final creator =
+          data['created_by_name'] as String? ??
           data['creatorName'] as String? ??
           'Someone';
 
@@ -465,8 +462,18 @@ class GroupDetailsService {
 
   String _monthLabel(int month) {
     const labels = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return labels[month - 1];
   }

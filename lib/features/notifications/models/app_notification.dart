@@ -46,6 +46,8 @@ class AppNotification {
         return 'removed a member';
       case 'GROUP_UPDATED':
         return 'updated the group';
+      case 'GROUP_DELETED':
+        return 'deleted a group';
       default:
         return 'sent an update';
     }
@@ -60,19 +62,21 @@ class AppNotification {
       id: id,
       userId: data['user_id'] as String? ?? data['userId'] as String? ?? '',
       groupId: data['group_id'] as String? ?? data['groupId'] as String? ?? '',
-      groupName: data['group_name'] as String? ??
+      groupName:
+          data['group_name'] as String? ??
           data['groupName'] as String? ??
           'Group',
-      groupImage: data['group_image'] as String? ??
-          data['groupImage'] as String? ??
-          '',
+      groupImage:
+          data['group_image'] as String? ?? data['groupImage'] as String? ?? '',
       title: data['title'] as String? ?? 'Notification',
       message: data['message'] as String? ?? '',
       type: data['type'] as String? ?? data['actionType'] as String? ?? '',
-      createdBy: data['created_by'] as String? ?? data['createdBy'] as String? ?? '',
+      createdBy:
+          data['created_by'] as String? ?? data['createdBy'] as String? ?? '',
       createdByName: createdByName,
       createdAt: parseDateTime(data['created_at'] ?? data['createdAt']),
-      isRead: data['is_read'] as bool? ??
+      isRead:
+          data['is_read'] as bool? ??
           data['isRead'] as bool? ??
           data['read'] as bool? ??
           false,

@@ -7,7 +7,7 @@ import '../../shared/models/app_user.dart';
 
 class SupabaseAuthService {
   SupabaseAuthService({SupabaseClient? client})
-      : _client = client ?? Supabase.instance.client;
+    : _client = client ?? Supabase.instance.client;
 
   final SupabaseClient _client;
 
@@ -43,10 +43,7 @@ class SupabaseAuthService {
     );
   }
 
-  Future<void> login({
-    required String email,
-    required String password,
-  }) async {
+  Future<void> login({required String email, required String password}) async {
     await _client.auth.signInWithPassword(
       email: email.trim().toLowerCase(),
       password: password,
@@ -68,6 +65,25 @@ class SupabaseAuthService {
   }
 
   Future<void> logout() => _client.auth.signOut();
+
+  Future<void> updateProfile({
+    required String userId,
+    required String fullName,
+  }) async {
+    final name = fullName.trim();
+    if (name.isEmpty) {
+      throw const AppAuthException('Name is required.');
+    }
+
+    await _client.auth.updateUser(UserAttributes(data: {'full_name': name}));
+    await _client
+        .from('users')
+        .update({
+          'full_name': name,
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
+        })
+        .eq('id', userId);
+  }
 
   /// Loads profile after session is ready; creates row from auth metadata if missing.
   Future<AppUser?> ensureUserProfile(String userId) async {
@@ -129,7 +145,8 @@ class SupabaseAuthService {
     late final StreamSubscription<AuthState> sub;
 
     sub = _client.auth.onAuthStateChange.listen((state) {
-      final ready = state.session != null ||
+      final ready =
+          state.session != null ||
           state.event == AuthChangeEvent.initialSession;
       if (ready && _client.auth.currentSession != null) {
         if (!completer.isCompleted) completer.complete();

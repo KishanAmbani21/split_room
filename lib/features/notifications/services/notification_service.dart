@@ -6,25 +6,21 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/services/fcm_push_service.dart';
 import '../../../core/services/local_notification_service.dart';
-import '../../../core/services/supabase_realtime_service.dart';
 import '../../groups/models/create_group_input.dart';
 import '../models/app_notification.dart';
 
 class NotificationService {
   NotificationService({
     SupabaseClient? client,
-    SupabaseRealtimeService? realtime,
     FcmPushService? fcmPush,
     FirebaseMessaging? messaging,
     LocalNotificationService? localNotifications,
-  })  : _client = client ?? Supabase.instance.client,
-        _realtime = realtime ?? SupabaseRealtimeService(),
-        _fcmPush = fcmPush ?? FcmPushService(),
-        _messaging = messaging ?? FirebaseMessaging.instance,
-        _local = localNotifications ?? LocalNotificationService.instance;
+  }) : _client = client ?? Supabase.instance.client,
+       _fcmPush = fcmPush ?? FcmPushService(),
+       _messaging = messaging ?? FirebaseMessaging.instance,
+       _local = localNotifications ?? LocalNotificationService.instance;
 
   final SupabaseClient _client;
-  final SupabaseRealtimeService _realtime;
   final FcmPushService _fcmPush;
   final FirebaseMessaging _messaging;
   final LocalNotificationService _local;
@@ -34,6 +30,7 @@ class NotificationService {
   StreamSubscription<String>? _tokenRefreshSub;
   StreamSubscription<RemoteMessage>? _foregroundMessageSub;
   bool _initializedForSession = false;
+  static int _notificationStreamId = 0;
 
   static const typeGroupCreated = 'GROUP_CREATED';
 
@@ -84,10 +81,10 @@ class NotificationService {
 
   Future<void> _showTrayNotification(RemoteMessage message) async {
     final notification = message.notification;
-    final title = notification?.title ??
-        message.data['title'] as String? ??
-        'RoomSplit';
-    final body = notification?.body ??
+    final title =
+        notification?.title ?? message.data['title'] as String? ?? 'RoomSplit';
+    final body =
+        notification?.body ??
         message.data['body'] as String? ??
         message.data['message'] as String? ??
         '';
@@ -123,11 +120,7 @@ class NotificationService {
   }
 
   Future<void> _requestPermission() async {
-    await _messaging.requestPermission(
-      alert: true,
-      badge: true,
-      sound: true,
-    );
+    await _messaging.requestPermission(alert: true, badge: true, sound: true);
     await _messaging.setForegroundNotificationPresentationOptions(
       alert: true,
       badge: true,
@@ -167,8 +160,9 @@ class NotificationService {
     String createdByName = 'Someone',
     String groupImage = '',
   }) async {
-    final targets =
-        memberIds.where((id) => id != excludeUserId && id.isNotEmpty).toList();
+    final targets = memberIds
+        .where((id) => id != excludeUserId && id.isNotEmpty)
+        .toList();
     await _createNotifications(
       userIds: targets,
       groupId: groupId,
@@ -222,10 +216,7 @@ class NotificationService {
       userIds: userIds,
       title: title,
       body: message,
-      data: {
-        'groupId': groupId,
-        'type': type,
-      },
+      data: {'groupId': groupId, 'type': type},
     );
   }
 
@@ -243,28 +234,58 @@ class NotificationService {
   }
 
   /// Emits immediately, then on each realtime change.
-  Stream<List<AppNotification>> watchNotificationList(String userId) async* {
-    try {
-      yield await fetchNotificationList(userId);
-    } catch (e) {
-      if (kDebugMode) debugPrint('[Notification] fetch failed: $e');
-      yield [];
-    }
+  Stream<List<AppNotification>> watchNotificationList(String userId) {
+    final controller = StreamController<List<AppNotification>>.broadcast();
+    final channelName =
+        'notifications_${userId}_${DateTime.now().microsecondsSinceEpoch}_${_notificationStreamId++}';
+    Timer? pollTimer;
+    late final RealtimeChannel channel;
 
-    await for (final _ in _realtime.watchUserNotifications(userId)) {
+    Future<void> emit() async {
       try {
-        yield await fetchNotificationList(userId);
-      } catch (e) {
-        if (kDebugMode) debugPrint('[Notification] refresh failed: $e');
-        yield [];
+        final items = await fetchNotificationList(
+          userId,
+        ).timeout(const Duration(seconds: 12));
+        if (!controller.isClosed) controller.add(items);
+      } catch (error, stackTrace) {
+        if (kDebugMode) {
+          debugPrint('[Notification] fetch failed: $error');
+        }
+        if (!controller.isClosed) controller.addError(error, stackTrace);
       }
     }
+
+    channel = _client.channel(channelName)
+      ..onPostgresChanges(
+        event: PostgresChangeEvent.all,
+        schema: 'public',
+        table: 'notifications',
+        filter: PostgresChangeFilter(
+          type: PostgresChangeFilterType.eq,
+          column: 'user_id',
+          value: userId,
+        ),
+        callback: (_) => unawaited(emit()),
+      )
+      ..subscribe();
+
+    unawaited(emit());
+    pollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      unawaited(emit());
+    });
+
+    controller.onCancel = () async {
+      pollTimer?.cancel();
+      await _client.removeChannel(channel);
+    };
+
+    return controller.stream;
   }
 
   Stream<int> watchUnreadCount(String userId) {
-    return watchNotificationList(userId).map(
-      (items) => items.where((n) => !n.isRead).length,
-    );
+    return watchNotificationList(
+      userId,
+    ).map((items) => items.where((n) => !n.isRead).length);
   }
 
   Future<void> markRead(String notificationId) async {
@@ -304,24 +325,31 @@ class NotificationService {
           final uid = map['id']?.toString() ?? '';
           if (uid.isEmpty) continue;
           nameById[uid] =
-              map['full_name'] as String? ?? map['fullName'] as String? ?? 'Member';
+              map['full_name'] as String? ??
+              map['fullName'] as String? ??
+              'Member';
         }
       } catch (_) {
         // Names are optional for display.
       }
     }
 
-    return rows.map((raw) {
-      final data = Map<String, dynamic>.from(raw as Map);
-      final id = data['id']?.toString() ?? '';
-      final createdBy =
-          data['created_by'] as String? ?? data['createdBy'] as String? ?? '';
-      return AppNotification.fromMap(
-        id,
-        data,
-        createdByName: nameById[createdBy] ?? 'Someone',
-      );
-    }).where((n) => n.id.isNotEmpty).toList();
+    return rows
+        .map((raw) {
+          final data = Map<String, dynamic>.from(raw as Map);
+          final id = data['id']?.toString() ?? '';
+          final createdBy =
+              data['created_by'] as String? ??
+              data['createdBy'] as String? ??
+              '';
+          return AppNotification.fromMap(
+            id,
+            data,
+            createdByName: nameById[createdBy] ?? 'Someone',
+          );
+        })
+        .where((n) => n.id.isNotEmpty)
+        .toList();
   }
 }
 

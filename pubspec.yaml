@@ -2,7 +2,7 @@ name: room_expense_manager
 description: Android room expense manager — Supabase data, Firebase FCM push.
 publish_to: 'none'
 
-version: 1.0.1+2
+version: 1.0.2+3
 
 environment:
   sdk: ^3.11.5

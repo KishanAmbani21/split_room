@@ -6,7 +6,7 @@ import '../../../core/services/supabase_auth_service.dart';
 /// Auth facade — Supabase Auth + public.users profile.
 class AuthRepository {
   AuthRepository({SupabaseAuthService? authService})
-      : _auth = authService ?? SupabaseAuthService();
+    : _auth = authService ?? SupabaseAuthService();
 
   final SupabaseAuthService _auth;
 
@@ -14,11 +14,15 @@ class AuthRepository {
     required String fullName,
     required String email,
     required String password,
-  }) =>
-      _auth.signUp(fullName: fullName, email: email, password: password);
+  }) => _auth.signUp(fullName: fullName, email: email, password: password);
 
   Future<void> login({required String email, required String password}) =>
       _auth.login(email: email, password: password);
 
   Future<void> logout() => _auth.logout();
+
+  Future<void> updateProfile({
+    required String userId,
+    required String fullName,
+  }) => _auth.updateProfile(userId: userId, fullName: fullName);
 }

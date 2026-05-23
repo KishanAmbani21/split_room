@@ -9,6 +9,7 @@ import '../../../shared/widgets/glass_card.dart';
 import '../../notifications/providers/notification_providers.dart';
 import '../providers/dashboard_providers.dart';
 import 'animated_fade_slide.dart';
+import 'dashboard_date_filter.dart';
 import 'dashboard_header.dart';
 import 'recent_activities_section.dart';
 import 'recent_groups_section.dart';
@@ -29,7 +30,7 @@ class DashboardHomeContent extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final dashboardAsync = ref.watch(dashboardDataProvider(user.uid));
+    final dashboardAsync = ref.watch(filteredDashboardDataProvider(user.uid));
 
     ref.listen(unreadNotificationCountProvider(user.uid), (previous, next) {
       if (!next.hasValue) return;
@@ -41,20 +42,18 @@ class DashboardHomeContent extends ConsumerWidget {
     });
 
     return dashboardAsync.when(
-      loading: () => const Center(
-        child: CircularProgressIndicator(),
-      ),
+      loading: () => const Center(child: CircularProgressIndicator()),
       error: (error, _) => _DashboardError(
         message: 'Could not load dashboard. Check connection and Supabase RLS.',
-        onRetry: () => ref.invalidate(dashboardDataProvider(user.uid)),
+        onRetry: () => ref.invalidate(filteredDashboardDataProvider(user.uid)),
       ),
       data: (data) {
         return PremiumBackground(
           child: RefreshIndicator(
             color: AppColors.primary,
             onRefresh: () async {
-              ref.invalidate(dashboardDataProvider(user.uid));
-              await ref.read(dashboardDataProvider(user.uid).future);
+              ref.invalidate(filteredDashboardDataProvider(user.uid));
+              await ref.read(filteredDashboardDataProvider(user.uid).future);
             },
             child: LayoutBuilder(
               builder: (context, constraints) {
@@ -76,6 +75,8 @@ class DashboardHomeContent extends ConsumerWidget {
                               onProfileTap: onProfileTap,
                             ),
                           ),
+                          const SizedBox(height: 16),
+                          const DashboardDateFilter(),
                           const SizedBox(height: 20),
                           AnimatedFadeSlide(
                             delay: const Duration(milliseconds: 50),
@@ -125,10 +126,7 @@ class DashboardHomeContent extends ConsumerWidget {
 }
 
 class _DashboardError extends StatelessWidget {
-  const _DashboardError({
-    required this.message,
-    required this.onRetry,
-  });
+  const _DashboardError({required this.message, required this.onRetry});
 
   final String message;
   final VoidCallback onRetry;
@@ -142,11 +140,7 @@ class _DashboardError extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.cloud_off_rounded,
-                size: 48,
-                color: AppColors.error,
-              ),
+              Icon(Icons.cloud_off_rounded, size: 48, color: AppColors.error),
               const SizedBox(height: 16),
               Text(message, textAlign: TextAlign.center),
               const SizedBox(height: 16),

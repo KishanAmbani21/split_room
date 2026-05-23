@@ -3,7 +3,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 /// Sends push notifications via Supabase Edge Function `send-fcm`.
 class FcmPushService {
   FcmPushService({SupabaseClient? client})
-      : _client = client ?? Supabase.instance.client;
+    : _client = client ?? Supabase.instance.client;
 
   final SupabaseClient _client;
 
@@ -17,7 +17,7 @@ class FcmPushService {
     if (targets.isEmpty) return;
 
     try {
-      await _client.functions.invoke(
+      final response = await _client.functions.invoke(
         'send-fcm',
         body: {
           'user_ids': targets,
@@ -26,6 +26,10 @@ class FcmPushService {
           'data': data ?? {},
         },
       );
+      final details = response.data;
+      if (details is Map && details['error'] != null) {
+        throw Exception(details['error']);
+      }
     } catch (_) {
       // Push is best-effort; in-app notifications still work via Realtime.
     }

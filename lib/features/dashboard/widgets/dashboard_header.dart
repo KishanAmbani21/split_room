@@ -69,19 +69,15 @@ class DashboardHeader extends ConsumerWidget {
           ),
         ),
         const SizedBox(width: 8),
-        unreadAsync.when(
-          data: (count) => _NotificationBell(
-            unreadCount: count,
-            onTap: () {
-              Navigator.of(context).push(
-                MaterialPageRoute<void>(
-                  builder: (_) => NotificationsScreen(user: user),
-                ),
-              );
-            },
-          ),
-          loading: () => const _NotificationBell(unreadCount: 0),
-          error: (_, __) => const _NotificationBell(unreadCount: 0),
+        _NotificationBell(
+          unreadCount: unreadAsync.value ?? 0,
+          onTap: () {
+            Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => NotificationsScreen(user: user),
+              ),
+            );
+          },
         ),
         const SizedBox(width: 4),
         UserAvatar(

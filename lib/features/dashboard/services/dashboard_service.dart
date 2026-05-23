@@ -12,16 +12,18 @@ import '../../expenses/services/expense_service.dart';
 import '../../groups/repositories/group_repository.dart';
 
 class DashboardService {
-  DashboardService({
-    SupabaseClient? client,
-    GroupRepository? groupRepository,
-  })  : _client = client ?? Supabase.instance.client,
-        _groups = groupRepository ?? GroupRepository(client: client);
+  DashboardService({SupabaseClient? client, GroupRepository? groupRepository})
+    : _client = client ?? Supabase.instance.client,
+      _groups = groupRepository ?? GroupRepository(client: client);
 
   final SupabaseClient _client;
   final GroupRepository _groups;
 
-  Future<DashboardData> fetchDashboard(String uid) async {
+  Future<DashboardData> fetchDashboard(
+    String uid, {
+    DateTime? start,
+    DateTime? end,
+  }) async {
     final memberGroupIds = await _groups.fetchUserMemberGroupIds(uid);
 
     final raw = await _client.rpc('get_dashboard_analytics');
@@ -35,35 +37,36 @@ class DashboardService {
     final expenses = (data['expenses'] as List? ?? [])
         .map((e) => Map<String, dynamic>.from(e as Map))
         .where((e) {
-          final gid = e['group_id']?.toString() ?? e['groupId']?.toString() ?? '';
+          final gid =
+              e['group_id']?.toString() ?? e['groupId']?.toString() ?? '';
           return memberGroupIds.contains(gid);
         })
         .map(_parseExpense)
         .toList();
     final groupMap = {for (final g in groups) g.groupId: g};
+    final scopedExpenses = _filterExpenses(expenses, start: start, end: end);
 
-    final summary = _computeSummary(uid, expenses);
-    final expenseByGroup = _expenseByGroup(expenses, uid);
-    final expenseByCategory = _expenseByCategory(expenses, uid);
-    final groupOverviews = _buildGroupOverviews(groups, expenses, uid)
+    final summary = _computeSummary(uid, scopedExpenses);
+    final expenseByGroup = _expenseByGroup(scopedExpenses, uid);
+    final expenseByCategory = _expenseByCategory(scopedExpenses, uid);
+    final groupOverviews = _buildGroupOverviews(groups, scopedExpenses, uid)
       ..sort((a, b) {
         final at = a.lastActivityAt ?? DateTime.fromMillisecondsSinceEpoch(0);
         final bt = b.lastActivityAt ?? DateTime.fromMillisecondsSinceEpoch(0);
         return bt.compareTo(at);
       });
-    final monthlySpending = _monthlySpending(expenses, uid);
-    final pendingBalances = _pendingBalances(uid, expenses);
-    final activities = _parseLogs(
-      data['logs'] as List? ?? [],
-      groupMap,
-    ).where((a) {
+    final monthlySpending = _monthlySpending(scopedExpenses, uid);
+    final pendingBalances = _pendingBalances(uid, scopedExpenses);
+    final activities = _parseLogs(data['logs'] as List? ?? [], groupMap).where((
+      a,
+    ) {
       if (a.type == ActivityType.groupDeleted) return true;
       final gid = a.groupId ?? '';
       return gid.isNotEmpty && memberGroupIds.contains(gid);
     }).toList();
-    final recentExpenses = _buildRecentExpenses(expenses, uid);
+    final recentExpenses = _buildRecentExpenses(scopedExpenses, uid);
     final mostActiveGroup = _mostActiveGroup(groupOverviews);
-    final topCategoryThisMonth = _topCategoryThisMonth(expenses, uid);
+    final topCategoryThisMonth = _topCategoryThisMonth(scopedExpenses, uid);
 
     return DashboardData(
       summary: summary,
@@ -79,11 +82,35 @@ class DashboardService {
     );
   }
 
+  List<_ExpenseDoc> _filterExpenses(
+    List<_ExpenseDoc> expenses, {
+    DateTime? start,
+    DateTime? end,
+  }) {
+    if (start == null && end == null) return expenses;
+
+    final startDay = start == null
+        ? null
+        : DateTime(start.year, start.month, start.day);
+    final endExclusive = end == null
+        ? null
+        : DateTime(end.year, end.month, end.day).add(const Duration(days: 1));
+
+    return expenses.where((expense) {
+      final date = expense.createdAt;
+      if (date == null) return false;
+      if (startDay != null && date.isBefore(startDay)) return false;
+      if (endExclusive != null && !date.isBefore(endExclusive)) return false;
+      return true;
+    }).toList();
+  }
+
   GroupOverview _parseGroup(Map<String, dynamic> data) {
     final memberIds = parseUuidList(data['member_ids'] ?? data['memberIds']);
     final updatedAt = parseDateTime(data['updated_at'] ?? data['updatedAt']);
-    final lastExpenseAt =
-        parseDateTime(data['last_expense_at'] ?? data['lastExpenseAt']);
+    final lastExpenseAt = parseDateTime(
+      data['last_expense_at'] ?? data['lastExpenseAt'],
+    );
     final createdAt = parseDateTime(data['created_at'] ?? data['createdAt']);
     DateTime? lastActivity = updatedAt;
     if (lastExpenseAt != null &&
@@ -93,14 +120,22 @@ class DashboardService {
 
     return GroupOverview(
       groupId: data['id'] as String? ?? data['groupId'] as String? ?? '',
-      groupName: data['group_name'] as String? ?? data['groupName'] as String? ?? 'Group',
-      groupImage: data['group_image'] as String? ?? data['groupImage'] as String? ?? '',
+      groupName:
+          data['group_name'] as String? ??
+          data['groupName'] as String? ??
+          'Group',
+      groupImage:
+          data['group_image'] as String? ?? data['groupImage'] as String? ?? '',
       memberCount: memberIds.length,
-      totalExpense: (data['total_expense'] as num? ?? data['totalExpense'] as num?)
+      totalExpense:
+          (data['total_expense'] as num? ?? data['totalExpense'] as num?)
               ?.toDouble() ??
           0,
       yourBalance: 0,
-      groupType: data['group_type'] as String? ?? data['groupType'] as String? ?? 'room',
+      groupType:
+          data['group_type'] as String? ??
+          data['groupType'] as String? ??
+          'room',
       createdAt: createdAt,
       lastActivityAt: lastActivity ?? createdAt,
     );
@@ -112,7 +147,10 @@ class DashboardService {
       final map = Map<String, dynamic>.from(s as Map);
       return _SplitPart(
         userId: map['userId'] as String? ?? map['user_id'] as String? ?? '',
-        userName: map['userName'] as String? ?? map['user_name'] as String? ?? 'Member',
+        userName:
+            map['userName'] as String? ??
+            map['user_name'] as String? ??
+            'Member',
         amount: (map['amount'] as num?)?.toDouble() ?? 0,
       );
     }).toList();
@@ -121,11 +159,15 @@ class DashboardService {
     return _ExpenseDoc(
       id: data['id'] as String? ?? '',
       groupId: data['group_id'] as String? ?? data['groupId'] as String? ?? '',
-      groupName: data['group_name'] as String? ?? data['groupName'] as String? ?? '',
+      groupName:
+          data['group_name'] as String? ?? data['groupName'] as String? ?? '',
       title: title,
       amount: (data['amount'] as num?)?.toDouble() ?? 0,
       paidBy: data['paid_by'] as String? ?? data['paidBy'] as String? ?? '',
-      paidByName: data['paid_by_name'] as String? ?? data['paidByName'] as String? ?? 'Someone',
+      paidByName:
+          data['paid_by_name'] as String? ??
+          data['paidByName'] as String? ??
+          'Someone',
       createdAt: parseDateTime(data['created_at'] ?? data['createdAt']),
       category: data['category'] as String? ?? inferExpenseCategory(title),
       splits: splits,
@@ -173,9 +215,7 @@ class DashboardService {
 
   GroupOverview? _mostActiveGroup(List<GroupOverview> groups) {
     if (groups.isEmpty) return null;
-    return groups.reduce(
-      (a, b) => a.totalExpense >= b.totalExpense ? a : b,
-    );
+    return groups.reduce((a, b) => a.totalExpense >= b.totalExpense ? a : b);
   }
 
   String _topCategoryThisMonth(List<_ExpenseDoc> expenses, String uid) {
@@ -291,10 +331,13 @@ class DashboardService {
     String uid,
   ) {
     return groups.map((group) {
-      final groupExpenses =
-          expenses.where((e) => e.groupId == group.groupId).toList();
-      final totalExpense =
-          groupExpenses.fold<double>(0, (total, e) => total + e.amount);
+      final groupExpenses = expenses
+          .where((e) => e.groupId == group.groupId)
+          .toList();
+      final totalExpense = groupExpenses.fold<double>(
+        0,
+        (total, e) => total + e.amount,
+      );
 
       var balance = 0.0;
       for (final expense in groupExpenses) {
@@ -324,7 +367,10 @@ class DashboardService {
     }).toList();
   }
 
-  List<MonthlySpending> _monthlySpending(List<_ExpenseDoc> expenses, String uid) {
+  List<MonthlySpending> _monthlySpending(
+    List<_ExpenseDoc> expenses,
+    String uid,
+  ) {
     final now = DateTime.now();
     final months = <MonthlySpending>[];
 
@@ -362,7 +408,10 @@ class DashboardService {
     return months;
   }
 
-  List<PendingBalance> _pendingBalances(String uid, List<_ExpenseDoc> expenses) {
+  List<PendingBalance> _pendingBalances(
+    String uid,
+    List<_ExpenseDoc> expenses,
+  ) {
     final balanceMap = <String, _PersonBalance>{};
 
     for (final expense in expenses) {
@@ -409,9 +458,14 @@ class DashboardService {
     Map<String, dynamic> data,
     Map<String, GroupOverview> groupMap,
   ) {
-    final action = data['action_type'] as String? ?? data['actionType'] as String? ?? '';
-    final creator = data['created_by_name'] as String? ?? data['creatorName'] as String? ?? 'Someone';
-    final groupId = data['group_id'] as String? ?? data['groupId'] as String? ?? '';
+    final action =
+        data['action_type'] as String? ?? data['actionType'] as String? ?? '';
+    final creator =
+        data['created_by_name'] as String? ??
+        data['creatorName'] as String? ??
+        'Someone';
+    final groupId =
+        data['group_id'] as String? ?? data['groupId'] as String? ?? '';
     final group = groupMap[groupId];
     final groupName =
         group?.groupName ??
@@ -427,8 +481,8 @@ class DashboardService {
       case 'GROUP_CREATED':
         type = ActivityType.groupCreated;
         title = 'Group created';
-        subtitle = data['action_message'] as String? ??
-            '$creator created this group';
+        subtitle =
+            data['action_message'] as String? ?? '$creator created this group';
         break;
       case 'GROUP_UPDATED':
         type = ActivityType.groupUpdated;
@@ -466,7 +520,8 @@ class DashboardService {
         type = ActivityType.groupDeleted;
         title = 'Group deleted';
         final deletedGroup = data['deleted_snapshot'] as Map?;
-        final deletedGroupName = deletedGroup?['group']?['group_name'] as String? ??
+        final deletedGroupName =
+            deletedGroup?['group']?['group_name'] as String? ??
             deletedGroup?['group']?['groupName'] as String? ??
             groupName;
         subtitle = '$creator deleted "$deletedGroupName"';
@@ -508,11 +563,13 @@ class DashboardService {
 
     if (type == ActivityType.expenseAdded ||
         type == ActivityType.expenseUpdated) {
-      relatedId = expenseData?['expenseId'] as String? ??
+      relatedId =
+          expenseData?['expenseId'] as String? ??
           expenseData?['expense_id'] as String?;
       amount = (expenseData?['amount'] as num?)?.toDouble();
     } else if (type == ActivityType.expenseDeleted) {
-      relatedId = deletedSnapshot?['expenseId'] as String? ??
+      relatedId =
+          deletedSnapshot?['expenseId'] as String? ??
           deletedSnapshot?['id'] as String?;
       amount = (deletedSnapshot?['amount'] as num?)?.toDouble();
     } else if (type == ActivityType.groupDeleted) {
@@ -524,7 +581,8 @@ class DashboardService {
       relatedId = deletedSnapshot?['uid'] as String?;
     }
 
-    final canUndo = !isRestored &&
+    final canUndo =
+        !isRestored &&
         (type == ActivityType.expenseDeleted ||
             type == ActivityType.groupDeleted ||
             type == ActivityType.memberRemoved);
@@ -548,8 +606,18 @@ class DashboardService {
 
   String _monthLabel(int month) {
     const labels = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return labels[month - 1];
   }

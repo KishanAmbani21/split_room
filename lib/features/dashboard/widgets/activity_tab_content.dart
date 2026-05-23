@@ -32,7 +32,7 @@ class _ActivityTabContentState extends ConsumerState<ActivityTabContent> {
 
     return dashboardAsync.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (_, __) => _ErrorState(
+      error: (_, _) => _ErrorState(
         onRetry: () => ref.invalidate(dashboardDataProvider(widget.user.uid)),
       ),
       data: (data) {
@@ -46,8 +46,8 @@ class _ActivityTabContentState extends ConsumerState<ActivityTabContent> {
                 Text(
                   'Activity',
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
+                    fontWeight: FontWeight.w800,
+                  ),
                 ),
                 const SizedBox(height: 20),
                 DashboardEmptyState(
@@ -79,10 +79,8 @@ class _ActivityTabContentState extends ConsumerState<ActivityTabContent> {
                     padding: const EdgeInsets.only(bottom: 16),
                     child: Text(
                       'Activity',
-                      style:
-                          Theme.of(context).textTheme.headlineSmall?.copyWith(
-                                fontWeight: FontWeight.w800,
-                              ),
+                      style: Theme.of(context).textTheme.headlineSmall
+                          ?.copyWith(fontWeight: FontWeight.w800),
                     ),
                   );
                 }
@@ -137,8 +135,8 @@ class _ExpandableGroupCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final brightness = theme.brightness;
-    final hasImage = group.groupImage.isNotEmpty &&
-        File(group.groupImage).existsSync();
+    final hasImage =
+        group.groupImage.isNotEmpty && File(group.groupImage).existsSync();
 
     return AnimatedSize(
       duration: const Duration(milliseconds: 280),
@@ -156,8 +154,9 @@ class _ExpandableGroupCard extends ConsumerWidget {
                   children: [
                     CircleAvatar(
                       radius: 24,
-                      backgroundColor:
-                          AppColors.primary.withValues(alpha: 0.12),
+                      backgroundColor: AppColors.primary.withValues(
+                        alpha: 0.12,
+                      ),
                       backgroundImage: hasImage
                           ? FileImage(File(group.groupImage))
                           : null,
@@ -206,10 +205,7 @@ class _ExpandableGroupCard extends ConsumerWidget {
               ),
             ),
             if (expanded) ...[
-              Divider(
-                height: 1,
-                color: AppColors.glassBorder(brightness),
-              ),
+              Divider(height: 1, color: AppColors.glassBorder(brightness)),
               Padding(
                 padding: const EdgeInsets.fromLTRB(14, 8, 14, 14),
                 child: Column(
@@ -249,9 +245,7 @@ class _ActivityTimelineTile extends ConsumerWidget {
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Restore deleted item?'),
-        content: Text(
-          'This will restore "${item.title}" and update balances.',
-        ),
+        content: Text('This will restore "${item.title}" and update balances.'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
@@ -267,7 +261,9 @@ class _ActivityTimelineTile extends ConsumerWidget {
     if (confirmed != true || !context.mounted) return;
 
     try {
-      await ref.read(activityUndoServiceProvider).restoreDeleted(
+      await ref
+          .read(activityUndoServiceProvider)
+          .restoreDeleted(
             item: item,
             userId: user.uid,
             userName: user.fullName.isEmpty ? 'You' : user.fullName,
@@ -364,8 +360,18 @@ class _ActivityTimelineTile extends ConsumerWidget {
 
   static String _formatDateTime(DateTime time) {
     const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
     ];
     return '${time.day} ${months[time.month - 1]}, ${time.hour}:${time.minute.toString().padLeft(2, '0')}';
   }

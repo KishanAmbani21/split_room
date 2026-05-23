@@ -7,13 +7,16 @@ import '../../../shared/layout/app_layout.dart';
 import '../../../shared/models/app_user.dart';
 import '../../../shared/providers/app_providers.dart';
 import '../../../shared/theme/app_colors.dart';
-import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/widgets/glass_card.dart';
 import '../../app_version/widgets/app_version_label.dart';
 import '../../dashboard/providers/dashboard_providers.dart';
 import '../../dashboard/widgets/animated_fade_slide.dart';
 import '../../notifications/providers/notification_providers.dart';
 import '../../notifications/screens/notifications_screen.dart';
+import 'app_settings_screen.dart';
+import 'edit_profile_screen.dart';
+import 'privacy_policy_screen.dart';
+import 'support_screen.dart';
 import '../widgets/settings_tile.dart';
 
 class ProfileScreen extends ConsumerWidget {
@@ -100,9 +103,10 @@ class ProfileScreen extends ConsumerWidget {
                         SettingsTile(
                           icon: Icons.person_outline_rounded,
                           title: 'Edit Profile',
-                          onTap: () => showAppSnackBar(
-                            context,
-                            'Edit profile — coming soon!',
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => EditProfileScreen(user: user),
+                            ),
                           ),
                         ),
                         SettingsTile(
@@ -170,26 +174,29 @@ class ProfileScreen extends ConsumerWidget {
                             compact: true,
                             textAlign: TextAlign.right,
                           ),
-                          onTap: () => showAppSnackBar(
-                            context,
-                            'App settings — coming soon!',
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const AppSettingsScreen(),
+                            ),
                           ),
                         ),
                         SettingsTile(
                           icon: Icons.help_outline_rounded,
                           title: 'Help & Support',
-                          onTap: () => showAppSnackBar(
-                            context,
-                            'Help & support — coming soon!',
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const SupportScreen(),
+                            ),
                           ),
                         ),
                         SettingsTile(
                           icon: Icons.privacy_tip_outlined,
                           title: 'Privacy Policy',
                           showDivider: false,
-                          onTap: () => showAppSnackBar(
-                            context,
-                            'Privacy policy — coming soon!',
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => const PrivacyPolicyScreen(),
+                            ),
                           ),
                         ),
                       ],

@@ -44,7 +44,9 @@ class _EditExpenseScreenState extends ConsumerState<EditExpenseScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      ref.read(editExpenseProvider.notifier).load(
+      ref
+          .read(editExpenseProvider.notifier)
+          .load(
             EditExpenseContext(
               expenseId: widget.expense.id,
               groupId: widget.expense.groupId,
@@ -147,9 +149,10 @@ class _EditExpenseScreenState extends ConsumerState<EditExpenseScreen> {
                             TextFormField(
                               controller: _amountController,
                               enabled: !state.isSubmitting,
-                              keyboardType: const TextInputType.numberWithOptions(
-                                decimal: true,
-                              ),
+                              keyboardType:
+                                  const TextInputType.numberWithOptions(
+                                    decimal: true,
+                                  ),
                               inputFormatters: [
                                 FilteringTextInputFormatter.allow(
                                   RegExp(r'^\d*\.?\d{0,2}'),
@@ -191,9 +194,7 @@ class _EditExpenseScreenState extends ConsumerState<EditExpenseScreen> {
                         ),
                       ),
                       const SizedBox(height: 14),
-                      SectionCard(
-                        child: const EditExpenseSplitBlock(),
-                      ),
+                      SectionCard(child: const EditExpenseSplitBlock()),
                       const SizedBox(height: 24),
                       GradientCreateButton(
                         label: 'Save Changes',
@@ -221,13 +222,16 @@ class _EditPaidBySelector extends ConsumerWidget {
 
     return Column(
       children: state.members.map((m) {
-        return RadioListTile<String>(
-          value: m.uid,
-          groupValue: state.paidByUserId,
-          onChanged: state.isSubmitting
-              ? null
-              : (v) => notifier.setPaidBy(v!),
+        final selected = state.paidByUserId == m.uid;
+        return ListTile(
+          enabled: !state.isSubmitting,
+          leading: Icon(
+            selected
+                ? Icons.radio_button_checked_rounded
+                : Icons.radio_button_unchecked_rounded,
+          ),
           title: Text(m.name),
+          onTap: state.isSubmitting ? null : () => notifier.setPaidBy(m.uid),
         );
       }).toList(),
     );
