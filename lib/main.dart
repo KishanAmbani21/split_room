@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'app.dart';
+import 'core/services/local_notification_service.dart';
 import 'core/supabase/supabase_bootstrap.dart';
 import 'core/supabase/supabase_init_error_app.dart';
 import 'firebase_options.dart';
@@ -15,6 +16,23 @@ import 'shared/providers/app_providers.dart';
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.android);
+
+  final notification = message.notification;
+  final title = notification?.title ??
+      message.data['title'] as String? ??
+      'RoomSplit';
+  final body = notification?.body ??
+      message.data['body'] as String? ??
+      message.data['message'] as String? ??
+      '';
+  if (body.isEmpty) return;
+
+  await LocalNotificationService.instance.initialize();
+  await LocalNotificationService.instance.show(
+    title: title,
+    body: body,
+    payload: message.data['groupId'] as String?,
+  );
 }
 
 Future<void> main() async {

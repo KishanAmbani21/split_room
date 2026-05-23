@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../groups/models/split_type.dart';
 import '../providers/add_expense_provider.dart';
+import 'split_remaining_label.dart';
 
 class ExpenseSplitInputs extends ConsumerWidget {
   const ExpenseSplitInputs({super.key});
@@ -116,7 +117,13 @@ class ExpenseSplitInputs extends ConsumerWidget {
             ),
           )
         else
-          _RemainingLabel(state: state, isPercent: isPercent),
+          SplitRemainingLabel(
+            splitType: state.splitType,
+            remainingCustom: state.remainingCustom,
+            remainingPercent: state.remainingPercent,
+            splitExceedsTotal: state.splitExceedsTotal,
+            hasAmount: state.parsedAmount != null,
+          ),
         if (state.splitExceedsTotal)
           Padding(
             padding: const EdgeInsets.only(top: 6),
@@ -145,44 +152,3 @@ class ExpenseSplitInputs extends ConsumerWidget {
   }
 }
 
-class _RemainingLabel extends StatelessWidget {
-  const _RemainingLabel({required this.state, required this.isPercent});
-
-  final AddExpenseState state;
-  final bool isPercent;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final brightness = theme.brightness;
-    final exceeds = state.splitExceedsTotal;
-    final color = exceeds
-        ? AppColors.errorColor(brightness)
-        : AppColors.primaryColor(brightness);
-
-    if (isPercent) {
-      final remaining = state.remainingPercent;
-      return Text(
-        remaining >= 0
-            ? 'Remaining: ${remaining.toStringAsFixed(1)}%'
-            : 'Over by: ${(-remaining).toStringAsFixed(1)}%',
-        style: theme.textTheme.labelMedium?.copyWith(
-          color: remaining < -0.1 ? AppColors.errorColor(brightness) : color,
-          fontWeight: FontWeight.w700,
-        ),
-      );
-    }
-
-    if (state.parsedAmount == null) return const SizedBox.shrink();
-    final remaining = state.remainingCustom;
-    return Text(
-      remaining >= 0
-          ? 'Remaining: ${AppColors.currencySymbol}${remaining.toStringAsFixed(2)}'
-          : 'Over by: ${AppColors.currencySymbol}${(-remaining).toStringAsFixed(2)}',
-      style: theme.textTheme.labelMedium?.copyWith(
-        color: exceeds ? AppColors.errorColor(brightness) : color,
-        fontWeight: FontWeight.w700,
-      ),
-    );
-  }
-}

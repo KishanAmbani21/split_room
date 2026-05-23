@@ -112,7 +112,12 @@ serve(async (req) => {
               token,
               notification: { title, body },
               data,
-              android: { priority: "HIGH" },
+              android: {
+              priority: "HIGH",
+              notification: {
+                channel_id: "room_expense_updates",
+              },
+            },
             },
           }),
         },

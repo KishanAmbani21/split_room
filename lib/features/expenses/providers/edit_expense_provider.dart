@@ -205,16 +205,28 @@ class EditExpenseNotifier extends Notifier<EditExpenseState> {
         .read(expenseServiceProvider)
         .fetchExpense(context.expenseId);
 
-    final splitMembers =
-        List<String>.from(data['splitMembers'] as List? ?? []);
-    final splitTypeName =
-        data['split_type'] as String? ?? data['splitType'] as String? ?? 'equal';
-    final splitType = SplitType.values.firstWhere(
-      (t) => t.name == splitTypeName,
-      orElse: () => SplitType.equal,
+    final splitsRaw = data['splits'] as List? ?? [];
+    var splitMembers = List<String>.from(
+      data['splitMembers'] as List? ?? data['memberIds'] as List? ?? [],
+    );
+    if (splitMembers.isEmpty) {
+      for (final s in splitsRaw) {
+        final map = Map<String, dynamic>.from(s as Map);
+        final uid =
+            map['userId'] as String? ?? map['user_id'] as String? ?? '';
+        if (uid.isNotEmpty && !splitMembers.contains(uid)) {
+          splitMembers.add(uid);
+        }
+      }
+    }
+    if (splitMembers.isEmpty) {
+      splitMembers = List<String>.from(context.memberIds);
+    }
+
+    final splitType = _parseSplitType(
+      data['split_type'] as String? ?? data['splitType'] as String?,
     );
 
-    final splitsRaw = data['splits'] as List? ?? [];
     final customAmounts = <String, double>{};
     final percentages = <String, double>{};
     final sharesMap = <String, int>{};
@@ -248,6 +260,16 @@ class EditExpenseNotifier extends Notifier<EditExpenseState> {
       }
     }
 
+    for (final uid in splitMembers) {
+      sharesMap.putIfAbsent(uid, () => 1);
+      if (splitType == SplitType.percentage) {
+        percentages.putIfAbsent(uid, () => 0);
+      }
+      if (splitType == SplitType.custom) {
+        customAmounts.putIfAbsent(uid, () => 0);
+      }
+    }
+
     state = EditExpenseState(
       expenseId: context.expenseId,
       groupId: context.groupId,
@@ -270,6 +292,14 @@ class EditExpenseNotifier extends Notifier<EditExpenseState> {
       shares: sharesMap,
       isLoading: false,
     );
+  }
+
+  SplitType _parseSplitType(String? raw) {
+    final name = (raw ?? 'equal').trim().toLowerCase();
+    for (final type in SplitType.values) {
+      if (type.name.toLowerCase() == name) return type;
+    }
+    return SplitType.equal;
   }
 
   void setTitle(String v) =>
@@ -373,7 +403,13 @@ class EditExpenseNotifier extends Notifier<EditExpenseState> {
           splitError = 'Percentages exceed 100%';
           valid = false;
         } else if ((state.percentTotal - 100).abs() > 0.1) {
-          splitError = 'Percentages must add up to 100%';
+          splitError =
+              'Remaining: ${state.remainingPercent.toStringAsFixed(1)}%';
+          valid = false;
+        }
+      } else if (state.splitType == SplitType.shares) {
+        if (state.totalShares <= 0) {
+          splitError = 'Enter at least one share';
           valid = false;
         }
       }

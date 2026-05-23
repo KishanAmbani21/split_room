@@ -10,6 +10,7 @@ import '../../groups/widgets/premium_section_header.dart';
 import '../models/expense_group_member.dart';
 import '../providers/edit_expense_provider.dart';
 import 'split_preview_banner.dart';
+import 'split_remaining_label.dart';
 
 /// Split type cards for edit expense (same UX as add expense).
 class EditSplitTypeSelector extends ConsumerWidget {
@@ -247,20 +248,42 @@ class EditExpenseSplitInputs extends ConsumerWidget {
     final isPercent = state.splitType == SplitType.percentage;
     final isShares = state.splitType == SplitType.shares;
 
+    final theme = Theme.of(context);
+    final errorColor = AppColors.errorColor(theme.brightness);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         const SizedBox(height: 14),
+        Text(
+          isShares
+              ? 'Shares per member (higher = pays more)'
+              : isPercent
+                  ? 'Percentage per member'
+                  : 'Exact amount per member',
+          style: theme.textTheme.labelLarge?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 10),
         for (final member in state.selectedMembers)
           Padding(
             padding: const EdgeInsets.only(bottom: 10),
             child: isShares
                 ? Row(
                     children: [
-                      Expanded(child: Text(member.name)),
+                      Expanded(
+                        child: Text(
+                          member.name,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
                       SizedBox(
-                        width: 100,
+                        width: 120,
                         child: TextFormField(
+                          key: ValueKey('edit_share_${member.uid}'),
                           enabled: !state.isSubmitting,
                           keyboardType: TextInputType.number,
                           inputFormatters: [
@@ -280,15 +303,26 @@ class EditExpenseSplitInputs extends ConsumerWidget {
                     ],
                   )
                 : TextFormField(
+                    key: ValueKey(
+                      'edit_${state.splitType.name}_${member.uid}',
+                    ),
                     enabled: !state.isSubmitting,
                     keyboardType:
                         const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(
+                        RegExp(r'^\d*\.?\d{0,2}'),
+                      ),
+                    ],
                     initialValue: isPercent
                         ? _fmt(state.percentages[member.uid])
                         : _fmt(state.customAmounts[member.uid]),
                     decoration: InputDecoration(
                       labelText: member.name,
                       suffixText: isPercent ? '%' : AppColors.currencySymbol,
+                      errorText: !isPercent && state.splitExceedsTotal
+                          ? 'Exceeds total'
+                          : null,
                     ),
                     onChanged: (v) {
                       final parsed = double.tryParse(v.trim()) ?? 0;
@@ -300,10 +334,38 @@ class EditExpenseSplitInputs extends ConsumerWidget {
                     },
                   ),
           ),
-        if (state.splitError != null)
+        if (isShares && state.parsedAmount != null)
           Text(
-            state.splitError!,
-            style: const TextStyle(color: AppColors.error),
+            'Total shares: ${state.totalShares} → '
+            '${AppColors.currencySymbol}${state.perShareAmount.toStringAsFixed(2)} per share',
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: AppColors.primaryColor(theme.brightness),
+              fontWeight: FontWeight.w700,
+            ),
+          )
+        else
+          SplitRemainingLabel(
+            splitType: state.splitType,
+            remainingCustom: state.remainingCustom,
+            remainingPercent: state.remainingPercent,
+            splitExceedsTotal: state.splitExceedsTotal,
+            hasAmount: state.parsedAmount != null,
+          ),
+        if (state.splitExceedsTotal)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              'Entered amounts exceed the total expense',
+              style: theme.textTheme.bodySmall?.copyWith(color: errorColor),
+            ),
+          )
+        else if (state.splitError != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text(
+              state.splitError!,
+              style: theme.textTheme.bodySmall?.copyWith(color: errorColor),
+            ),
           ),
       ],
     );
@@ -341,6 +403,15 @@ class EditExpenseSplitBlock extends ConsumerWidget {
         ),
         const SizedBox(height: 14),
         const EditSplitMembersSection(),
+        if (state.membersError != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            state.membersError!,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: AppColors.error,
+                ),
+          ),
+        ],
         const EditExpenseSplitInputs(),
         SplitPreviewBanner(
           amount: state.parsedAmount,

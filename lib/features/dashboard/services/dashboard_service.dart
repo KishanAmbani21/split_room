@@ -9,26 +9,37 @@ import '../models/monthly_spending.dart';
 import '../models/pending_balance.dart';
 import '../models/recent_expense_item.dart';
 import '../../expenses/services/expense_service.dart';
+import '../../groups/repositories/group_repository.dart';
 
 class DashboardService {
-  DashboardService({SupabaseClient? client})
-      : _client = client ?? Supabase.instance.client;
+  DashboardService({
+    SupabaseClient? client,
+    GroupRepository? groupRepository,
+  })  : _client = client ?? Supabase.instance.client,
+        _groups = groupRepository ?? GroupRepository(client: client);
 
   final SupabaseClient _client;
+  final GroupRepository _groups;
 
   Future<DashboardData> fetchDashboard(String uid) async {
+    final memberGroupIds = await _groups.fetchUserMemberGroupIds(uid);
+
     final raw = await _client.rpc('get_dashboard_analytics');
     final data = Map<String, dynamic>.from(raw as Map);
 
     final groups = (data['groups'] as List? ?? [])
         .map((g) => Map<String, dynamic>.from(g as Map))
-        .where((g) => _userBelongsToGroup(g, uid))
+        .where((g) => memberGroupIds.contains(g['id']?.toString() ?? ''))
         .map(_parseGroup)
         .toList();
     final expenses = (data['expenses'] as List? ?? [])
-        .map((e) => _parseExpense(Map<String, dynamic>.from(e as Map)))
+        .map((e) => Map<String, dynamic>.from(e as Map))
+        .where((e) {
+          final gid = e['group_id']?.toString() ?? e['groupId']?.toString() ?? '';
+          return memberGroupIds.contains(gid);
+        })
+        .map(_parseExpense)
         .toList();
-    final memberGroupIds = groups.map((g) => g.groupId).toSet();
     final groupMap = {for (final g in groups) g.groupId: g};
 
     final summary = _computeSummary(uid, expenses);
@@ -47,8 +58,8 @@ class DashboardService {
       groupMap,
     ).where((a) {
       if (a.type == ActivityType.groupDeleted) return true;
-      final gid = a.groupId;
-      return gid == null || gid.isEmpty || memberGroupIds.contains(gid);
+      final gid = a.groupId ?? '';
+      return gid.isNotEmpty && memberGroupIds.contains(gid);
     }).toList();
     final recentExpenses = _buildRecentExpenses(expenses, uid);
     final mostActiveGroup = _mostActiveGroup(groupOverviews);
@@ -139,13 +150,6 @@ class DashboardService {
     });
 
     return logs.take(20).toList();
-  }
-
-  bool _userBelongsToGroup(Map<String, dynamic> group, String uid) {
-    final memberIds = parseUuidList(group['member_ids'] ?? group['memberIds']);
-    final createdBy =
-        group['created_by'] as String? ?? group['createdBy'] as String? ?? '';
-    return createdBy == uid || memberIds.contains(uid);
   }
 
   double _userShare(_ExpenseDoc expense, String uid) {

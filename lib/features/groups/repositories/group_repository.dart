@@ -15,16 +15,25 @@ class GroupRepository {
   final SupabaseClient _client;
   final SupabaseRealtimeService _realtime;
 
+  /// Groups where [userId] has a row in `group_members` (sole source of truth).
   Stream<List<GroupModel>> watchGroupsForUser(String userId) {
     return _realtime.watchUserGroups(userId).map(
-          (rows) => rows
-              .map((r) => GroupModel.fromMap(r['id'] as String, r))
-              .where(
-                (g) =>
-                    g.createdBy == userId || g.memberIds.contains(userId),
-              )
-              .toList(),
+          (rows) =>
+              rows.map((r) => GroupModel.fromMap(r['id'] as String, r)).toList(),
         );
+  }
+
+  /// Group IDs from `group_members` for the logged-in user.
+  Future<Set<String>> fetchUserMemberGroupIds(String userId) async {
+    final rows = await _client
+        .from('group_members')
+        .select('group_id')
+        .eq('user_id', userId)
+        .isFilter('deleted_at', null);
+    return (rows as List)
+        .map((r) => r['group_id']?.toString() ?? '')
+        .where((id) => id.isNotEmpty)
+        .toSet();
   }
 
   /// All active member user IDs for a group (for notifications).

@@ -21,16 +21,25 @@ class SupabaseRealtimeService {
     Future<void> emit() async {
       final rows = await _client
           .from('group_members')
-          .select('group_id, groups(*)')
+          .select('user_id, group_id, groups(*)')
           .eq('user_id', userId)
           .isFilter('deleted_at', null);
       final groups = <Map<String, dynamic>>[];
       for (final row in rows as List) {
-        if (row['user_id']?.toString() != userId) continue;
-        final g = row['groups'];
-        if (g is Map<String, dynamic> && g['deleted_at'] == null) {
-          groups.add(g);
+        var g = row['groups'];
+        if (g is! Map<String, dynamic> || g['deleted_at'] != null) {
+          final groupId = row['group_id']?.toString();
+          if (groupId == null || groupId.isEmpty) continue;
+          final fetched = await _client
+              .from('groups')
+              .select()
+              .eq('id', groupId)
+              .isFilter('deleted_at', null)
+              .maybeSingle();
+          if (fetched == null) continue;
+          g = Map<String, dynamic>.from(fetched);
         }
+        groups.add(Map<String, dynamic>.from(g));
       }
       groups.sort((a, b) {
         final at = _activityTime(a);
@@ -170,11 +179,17 @@ class SupabaseRealtimeService {
     final controller = StreamController<List<Map<String, dynamic>>>.broadcast();
 
     Future<void> emit() async {
-      final rows = await fetch();
-      final list = (rows as List)
-          .map((e) => Map<String, dynamic>.from(e as Map))
-          .toList();
-      if (!controller.isClosed) controller.add(list);
+      try {
+        final rows = await fetch();
+        final list = (rows as List)
+            .map((e) => Map<String, dynamic>.from(e as Map))
+            .toList();
+        if (!controller.isClosed) controller.add(list);
+      } catch (error, stack) {
+        if (!controller.isClosed) {
+          controller.addError(error, stack);
+        }
+      }
     }
 
     final channel = _channel(channelName)

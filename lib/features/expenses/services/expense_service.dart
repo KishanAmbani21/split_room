@@ -51,6 +51,7 @@ class ExpenseService {
       title: 'Expense Added',
       message: '${input.createdByName} added "${input.title.trim()}"',
       createdBy: input.createdBy,
+      createdByName: input.createdByName,
     );
 
     return expenseId.toString();
@@ -123,6 +124,7 @@ class ExpenseService {
       title: 'Expense Updated',
       message: '$updatedByName updated "${input.title.trim()}"',
       createdBy: input.createdBy,
+      createdByName: updatedByName,
     );
   }
 
@@ -191,6 +193,7 @@ class ExpenseService {
       title: 'Expense Deleted',
       message: '$deletedByName deleted "$title"',
       createdBy: deletedBy,
+      createdByName: deletedByName,
     );
   }
 
@@ -276,6 +279,7 @@ class ExpenseService {
     required String title,
     required String message,
     required String createdBy,
+    required String createdByName,
     String groupImage = '',
   }) async {
     final notifications = _notifications;
@@ -302,6 +306,7 @@ class ExpenseService {
       title: title,
       message: message,
       createdBy: createdBy,
+      createdByName: createdByName,
     );
   }
 }

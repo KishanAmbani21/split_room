@@ -15,24 +15,25 @@ class MonthlySummaryCards extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final wide = constraints.maxWidth >= 520;
+        final brightness = Theme.of(context).brightness;
         final cards = [
-          _SummaryCard(
-            label: AppStrings.thisMonthNeedToPay,
-            value: summary.monthNeedToPay,
-            icon: Icons.arrow_upward_rounded,
-            accent: AppColors.errorColor(Theme.of(context).brightness),
-          ),
           _SummaryCard(
             label: AppStrings.totalMoneySpent,
             value: summary.monthTotalSpent,
             icon: Icons.account_balance_wallet_outlined,
-            accent: AppColors.secondaryColor(Theme.of(context).brightness),
+            accent: AppColors.secondaryColor(brightness),
           ),
           _SummaryCard(
             label: AppStrings.totalWillReceive,
-            value: summary.monthWillReceive,
+            value: summary.willReceive,
             icon: Icons.arrow_downward_rounded,
-            accent: AppColors.successColor(Theme.of(context).brightness),
+            accent: AppColors.successColor(brightness),
+          ),
+          _SummaryCard(
+            label: AppStrings.youNeedToPay,
+            value: summary.monthNeedToPay,
+            icon: Icons.arrow_upward_rounded,
+            accent: AppColors.errorColor(brightness),
           ),
         ];
 

@@ -91,12 +91,16 @@ class _EditExpenseScreenState extends ConsumerState<EditExpenseScreen> {
     final state = ref.watch(editExpenseProvider);
     final notifier = ref.read(editExpenseProvider.notifier);
 
-    if (!state.isLoading &&
-        _titleController.text.isEmpty &&
-        state.title.isNotEmpty) {
-      _titleController.text = state.title;
-      _amountController.text = state.amountText;
-      _notesController.text = state.notes;
+    if (!state.isLoading && state.title.isNotEmpty) {
+      if (_titleController.text != state.title) {
+        _titleController.text = state.title;
+      }
+      if (_amountController.text != state.amountText) {
+        _amountController.text = state.amountText;
+      }
+      if (_notesController.text != state.notes) {
+        _notesController.text = state.notes;
+      }
     }
 
     return PremiumBackground(
