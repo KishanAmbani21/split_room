@@ -1,30 +1,50 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../app.dart';
+import '../../features/app_version/presentation/update_required_screen.dart';
 import '../../shared/branding/app_branding.dart';
+import '../../shared/providers/app_providers.dart';
 import '../../shared/widgets/brand_mark.dart';
 
-class SplashGate extends StatefulWidget {
+class SplashGate extends ConsumerStatefulWidget {
   const SplashGate({super.key});
 
   @override
-  State<SplashGate> createState() => _SplashGateState();
+  ConsumerState<SplashGate> createState() => _SplashGateState();
 }
 
-class _SplashGateState extends State<SplashGate> {
+class _SplashGateState extends ConsumerState<SplashGate> {
+  Timer? _timer;
+
   @override
   void initState() {
     super.initState();
-    Timer(const Duration(milliseconds: 900), () {
-      if (!mounted) {
-        return;
-      }
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute<void>(builder: (_) => const AppEntry()),
-      );
-    });
+    _timer = Timer(const Duration(milliseconds: 900), _openNextScreen);
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _openNextScreen() async {
+    final updateStatus = await ref
+        .read(appVersionServiceProvider)
+        .checkForUpdate();
+
+    if (!mounted) return;
+
+    Navigator.of(context).pushReplacement(
+      MaterialPageRoute<void>(
+        builder: (_) => updateStatus.updateRequired
+            ? UpdateRequiredScreen(status: updateStatus)
+            : const AppEntry(),
+      ),
+    );
   }
 
   @override

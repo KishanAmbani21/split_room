@@ -9,6 +9,7 @@ import '../../../shared/providers/app_providers.dart';
 import '../../../shared/theme/app_colors.dart';
 import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/widgets/glass_card.dart';
+import '../../app_version/widgets/app_version_label.dart';
 import '../../dashboard/providers/dashboard_providers.dart';
 import '../../dashboard/widgets/animated_fade_slide.dart';
 import '../../notifications/providers/notification_providers.dart';
@@ -16,11 +17,7 @@ import '../../notifications/screens/notifications_screen.dart';
 import '../widgets/settings_tile.dart';
 
 class ProfileScreen extends ConsumerWidget {
-  const ProfileScreen({
-    required this.user,
-    required this.onLogout,
-    super.key,
-  });
+  const ProfileScreen({required this.user, required this.onLogout, super.key});
 
   final AppUser user;
   final VoidCallback onLogout;
@@ -53,10 +50,12 @@ class ProfileScreen extends ConsumerWidget {
                         tag: 'profile_avatar_${user.uid}',
                         child: CircleAvatar(
                           radius: 52,
-                          backgroundColor:
-                              AppColors.primary.withValues(alpha: 0.12),
-                          backgroundImage:
-                              hasPhoto ? FileImage(File(imageUrl)) : null,
+                          backgroundColor: AppColors.primary.withValues(
+                            alpha: 0.12,
+                          ),
+                          backgroundImage: hasPhoto
+                              ? FileImage(File(imageUrl))
+                              : null,
                           child: hasPhoto
                               ? null
                               : Text(
@@ -83,8 +82,9 @@ class ProfileScreen extends ConsumerWidget {
                       Text(
                         user.email,
                         style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurface
-                              .withValues(alpha: 0.55),
+                          color: theme.colorScheme.onSurface.withValues(
+                            alpha: 0.55,
+                          ),
                         ),
                       ),
                     ],
@@ -159,14 +159,17 @@ class ProfileScreen extends ConsumerWidget {
                               : null,
                           onTap: () => Navigator.of(context).push(
                             MaterialPageRoute<void>(
-                              builder: (_) =>
-                                  NotificationsScreen(user: user),
+                              builder: (_) => NotificationsScreen(user: user),
                             ),
                           ),
                         ),
                         SettingsTile(
                           icon: Icons.settings_outlined,
                           title: 'App Settings',
+                          trailing: const AppVersionLabel(
+                            compact: true,
+                            textAlign: TextAlign.right,
+                          ),
                           onTap: () => showAppSnackBar(
                             context,
                             'App settings — coming soon!',
@@ -200,7 +203,10 @@ class ProfileScreen extends ConsumerWidget {
                     width: double.infinity,
                     child: OutlinedButton.icon(
                       onPressed: onLogout,
-                      icon: const Icon(Icons.logout_rounded, color: AppColors.error),
+                      icon: const Icon(
+                        Icons.logout_rounded,
+                        color: AppColors.error,
+                      ),
                       label: const Text(
                         'Logout',
                         style: TextStyle(
@@ -220,6 +226,8 @@ class ProfileScreen extends ConsumerWidget {
                     ),
                   ),
                 ),
+                const SizedBox(height: 12),
+                const AppVersionLabel(),
               ],
             ),
           ),

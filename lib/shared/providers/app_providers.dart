@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
@@ -6,6 +7,7 @@ import '../../core/supabase/supabase_client.dart';
 import '../../core/services/supabase_auth_service.dart';
 import '../../core/services/supabase_realtime_service.dart';
 import '../../core/services/fcm_push_service.dart';
+import '../../features/app_version/services/app_version_service.dart';
 import '../models/app_user.dart';
 import '../../features/auth/data/auth_repository.dart';
 
@@ -48,6 +50,14 @@ final fcmPushServiceProvider = Provider<FcmPushService>(
   (ref) => FcmPushService(client: ref.watch(supabaseClientProvider)),
 );
 
+final appVersionServiceProvider = Provider<AppVersionService>(
+  (ref) => AppVersionService(client: ref.watch(supabaseClientProvider)),
+);
+
+final packageInfoProvider = FutureProvider<PackageInfo>((ref) {
+  return PackageInfo.fromPlatform();
+});
+
 final authRepositoryProvider = Provider<AuthRepository>(
   (ref) => AuthRepository(authService: ref.watch(supabaseAuthServiceProvider)),
 );
@@ -64,9 +74,7 @@ final currentUserIdProvider = Provider<String?>((ref) {
 });
 
 /// Profile for dashboard — waits for session, creates row if DB trigger missed it.
-final userDocumentProvider = StreamProvider.autoDispose.family<AppUser?, String>((
-  ref,
-  uid,
-) {
-  return ref.watch(supabaseAuthServiceProvider).watchUserProfile(uid);
-});
+final userDocumentProvider = StreamProvider.autoDispose
+    .family<AppUser?, String>((ref, uid) {
+      return ref.watch(supabaseAuthServiceProvider).watchUserProfile(uid);
+    });
